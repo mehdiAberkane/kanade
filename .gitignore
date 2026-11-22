@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 
 coverage
+
+# Claude Code: personal settings stay local, launch.json is shared
+.claude/settings.local.json
