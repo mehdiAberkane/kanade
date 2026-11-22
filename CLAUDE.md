@@ -28,3 +28,7 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
 - Cargo est dans `%USERPROFILE%\.cargo\bin` : l'ajouter au PATH du shell s'il n'y est pas.
 - La CI tourne sur Windows (job `checks`), comme l'app : pas de paquets système à installer pour Tauri.
 - Interface en français, code et commits en anglais.
+- Icône : la source est `app-icon.svg`. Pour la changer, `npm run tauri icon app-icon.svg`,
+  puis supprimer `src-tauri/icons/android` et `src-tauri/icons/ios` (app Windows seulement).
+  Cargo ne voit pas le changement d'icône : `cargo clean -p kanade` dans `src-tauri` avant
+  de relancer, sinon la fenêtre garde l'ancienne.
