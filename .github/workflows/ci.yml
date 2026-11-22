@@ -1,5 +1,7 @@
 # Checks every push to main and every pull request: interface (types, lint,
-# tests, build, npm audit) then Rust (format, Clippy, tests, cargo audit).
+# tests, build, npm audit) then Rust (format, Clippy, tests, cargo audit), an
+# audit of the workflows themselves (zizmor) and, on pull requests, a review
+# of the new dependencies. The three jobs are required on main.
 # Actions are pinned to a commit SHA; Dependabot updates them.
 name: CI
 
@@ -74,3 +76,32 @@ jobs:
         run: |
           cargo audit --version >/dev/null 2>&1 || cargo install cargo-audit --locked --version 0.23.0
           cargo audit
+
+  # Static audit of the workflows (injections, permissions, credentials left
+  # in the checkout, unpinned actions...). Fails on any finding.
+  workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: zizmorcore/zizmor-action@bd12b495c90993a4301c73398142281a61499af3 # v0.9.0
+        with:
+          version: 1.33.1
+          advanced-security: false
+          annotations: true
+
+  # On a pull request: refuses a new dependency with a known vulnerability
+  # (high and above) or an incompatible license, before it lands on main.
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
+        with:
+          fail-on-severity: high

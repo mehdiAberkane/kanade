@@ -8,8 +8,10 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
 
 - **Tickets** : tableau Todoom « Kanade », cartes KAN-1, KAN-2…
 - **Dépôt** : https://github.com/mehdiAberkane/kanade (GitHub, public), branche principale `main`.
-- **PR/MR** : `gh pr create` vers `main`, en fusion automatique quand la CI est verte
-  (CI obligatoire sur `main`).
+- **PR/MR** : `gh pr create` vers `main`, en fusion automatique quand la CI est verte.
+  Checks obligatoires sur `main` : `checks` (build, tests, lint, audits), `workflows`
+  (zizmor) et `dependency-review`. CodeQL (`codeql.yml`) est informatif : ses alertes
+  vont dans l'onglet Security.
 - **Techno** : Tauri 2 (Rust, édition 2024) + React 19 + TypeScript 6 (Vite 8) ; Node 22 en CI.
 
 ## Commandes
