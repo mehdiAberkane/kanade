@@ -1,0 +1,30 @@
+@~/.claude/facon-de-travailler.md
+
+# Kanade
+
+Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) : bibliothèques, morceaux, albums, artistes.
+
+## Ce projet
+
+- **Tickets** : tableau Todoom « Kanade », cartes KAN-1, KAN-2…
+- **Dépôt** : https://github.com/mehdiAberkane/kanade (GitHub, public), branche principale `main`.
+- **PR/MR** : `gh pr create` vers `main`, en fusion automatique quand la CI est verte
+  (CI obligatoire sur `main`).
+- **Techno** : Tauri 2 (Rust, édition 2024) + React 19 + TypeScript 6 (Vite 8) ; Node 22 en CI.
+
+## Commandes
+
+- Installer : `npm install`
+- Tests : `npm test`, puis `cargo test` dans `src-tauri`
+- Typage : `npm run typecheck`
+- Lint / format : `npm run lint`, puis dans `src-tauri` : `cargo fmt` et
+  `cargo clippy --all-targets -- -D warnings`
+- Lancer en local : `npm run tauri dev`
+
+## À savoir
+
+- Rust embarque l'interface construite : sur un clone neuf, lance `npm run build` avant
+  `cargo clippy` ou `cargo test` (sinon `../dist` manque).
+- Cargo est dans `%USERPROFILE%\.cargo\bin` : l'ajouter au PATH du shell s'il n'y est pas.
+- La CI tourne sur Windows (job `checks`), comme l'app : pas de paquets système à installer pour Tauri.
+- Interface en français, code et commits en anglais.

@@ -1,0 +1,35 @@
+# Weekly updates of the GitHub Actions (pinned by SHA), the npm packages and
+# the Rust crates; minor and patch grouped, majors one by one. A version must
+# be 7 days old before it is proposed (cooldown). The CI of each pull request
+# decides.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      npm-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      cargo-minor:
+        update-types: [minor, patch]

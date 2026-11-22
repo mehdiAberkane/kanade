@@ -1,0 +1,76 @@
+# Checks every push to main and every pull request: interface (types, lint,
+# tests, build, npm audit) then Rust (format, Clippy, tests, cargo audit).
+# Actions are pinned to a commit SHA; Dependabot updates them.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    # Windows: the platform Kanade runs on, and Tauri builds there without
+    # extra system packages.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci --ignore-scripts
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint (ESLint)
+        run: npm run lint
+
+      - name: Interface tests
+        run: npm test
+
+      # Tauri embeds the built interface: Rust needs dist/ to compile.
+      - name: Build the interface
+        run: npm run build
+
+      - name: npm dependency audit
+        run: npm audit --audit-level=high
+
+      - name: Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt --check
+
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: Rust dependency audit
+        working-directory: src-tauri
+        shell: bash
+        run: |
+          cargo audit --version >/dev/null 2>&1 || cargo install cargo-audit --locked --version 0.23.0
+          cargo audit
