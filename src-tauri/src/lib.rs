@@ -1,3 +1,5 @@
+pub mod library;
+
 /// Version of the app, shown in the interface.
 #[tauri::command]
 fn app_version() -> &'static str {

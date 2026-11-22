@@ -35,7 +35,9 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   Hors de Tauri, en dev seulement, `src/dev/mockBackend.ts` répond aux commandes Rust
   (`mockIPC`) : **chaque nouvelle commande Rust y ajoute sa réponse simulée**, avec des
   données d'exemple réalistes.
-- La logique Rust se vérifie par `cargo test`, sur des fichiers d'exemple.
+- La logique Rust se vérifie par `cargo test`, sur des fichiers d'exemple :
+  `src-tauri/tests/fixtures` (un son d'une seconde par format, sans tags ; les tests y
+  écrivent les tags avec lofty). Son README dit comment les régénérer avec VLC.
 - Seul ce que Windows est le seul à montrer demande une prise de contrôle : fenêtre native,
   barre des tâches, sélecteur de dossier, lecture audio réelle. Demande d'abord ; si je
   refuse ou ne réponds pas, mets-le dans « À vérifier » du compte rendu.
