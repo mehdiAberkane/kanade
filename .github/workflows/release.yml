@@ -29,7 +29,9 @@ permissions: {}
 jobs:
   # Same checks as on every push: nothing is built or signed unless they pass.
   checks:
-    uses: ./.github/workflows/ci.yml
+    # Same commit as this run either way; './' is the form Todoom's release
+    # already runs with, so zizmor's suggestion of '$/' is not followed.
+    uses: ./.github/workflows/ci.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read
 
