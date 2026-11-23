@@ -9,9 +9,11 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
 - **Tickets** : tableau Todoom « Kanade », cartes KAN-1, KAN-2…
 - **Dépôt** : https://github.com/mehdiAberkane/kanade (GitHub, public), branche principale `main`.
 - **PR/MR** : `gh pr create` vers `main`, en fusion automatique quand la CI est verte.
-  Checks obligatoires sur `main` : `checks` (build, tests, lint, audits), `workflows`
-  (zizmor) et `dependency-review`. CodeQL (`codeql.yml`) est informatif : ses alertes
-  vont dans l'onglet Security.
+  Checks obligatoires sur `main` : `interface` (typage, lint, tests et couverture, audit
+  npm, sur Ubuntu), `rust` (build, format, Clippy, tests et couverture, cargo-deny, sur
+  Windows), `workflows` (zizmor) et `dependency-review`. Renommer un de ces jobs oblige à
+  mettre à jour la protection de `main`, sinon plus aucune PR ne fusionne. CodeQL
+  (`codeql.yml`) est informatif : ses alertes vont dans l'onglet Security.
 - **Techno** : Tauri 2 (Rust, édition 2024) + React 19 + TypeScript 6 (Vite 8) ; Node 22 en CI.
 
 ## Commandes
@@ -64,7 +66,13 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
 - Rust embarque l'interface construite : sur un clone neuf, lance `npm run build` avant
   `cargo clippy` ou `cargo test` (sinon `../dist` manque).
 - Cargo est dans `%USERPROFILE%\.cargo\bin` : l'ajouter au PATH du shell s'il n'y est pas.
-- La CI tourne sur Windows (job `checks`), comme l'app : pas de paquets système à installer pour Tauri.
+- La partie Rust de la CI tourne sur Windows (job `rust`), comme l'app : pas de paquets
+  système à installer pour Tauri. L'interface tourne sur Ubuntu (job `interface`), en
+  parallèle.
+- Cache Rust de la CI (rust-cache) : il n'enregistre rien quand sa clé existe déjà, et la
+  clé ne suit que `Cargo.toml`, `Cargo.lock` et la version de Rust. Après l'ajout d'un
+  outil installé par `cargo install` ou d'un nouveau build, monte `key` dans `ci.yml`
+  (`v1` → `v2`), sinon il est refait à chaque run.
 - `tauri build` demande la clé de signature, car il écrit les fichiers de mise à jour.
   Pour un installeur local sans clé :
   `npm run tauri build -- --config src-tauri/tauri.unsigned.conf.json`.

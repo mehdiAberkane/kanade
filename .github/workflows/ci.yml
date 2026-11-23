@@ -1,9 +1,12 @@
-# Checks every push to main and every pull request: interface (types, lint,
-# tests with coverage thresholds, build, npm audit) then Rust (format, Clippy,
-# tests with a coverage threshold, cargo-deny), an audit of the workflows
-# themselves (zizmor) and, on pull requests, a review of the new dependencies.
-# The three jobs are required on main. The release workflow runs it too and
-# only publishes when it passes.
+# Checks every push to main and every pull request, in parallel:
+# - interface, on Ubuntu (faster to start): types, lint, tests with coverage
+#   thresholds, npm audit;
+# - rust, on Windows (the platform Kanade runs on): format, Clippy, tests with
+#   a coverage threshold, cargo-deny;
+# - workflows: an audit of the workflows themselves (zizmor);
+# - dependency-review, on pull requests: the new dependencies.
+# The four are required on main. The release workflow runs it too and only
+# publishes when it passes.
 # Actions are pinned to a commit SHA; Dependabot updates them.
 name: CI
 
@@ -21,7 +24,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  checks:
+  interface:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci --ignore-scripts
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint (ESLint)
+        run: npm run lint
+
+      # Thresholds in vitest.config.ts; the summary is printed in the log.
+      - name: Interface tests, with coverage thresholds
+        run: npm run test:coverage
+
+      - name: npm dependency audit
+        run: npm audit --audit-level=high
+
+  rust:
     # Windows: the platform Kanade runs on, and Tauri builds there without
     # extra system packages.
     runs-on: windows-latest
@@ -43,25 +73,18 @@ jobs:
       - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: src-tauri -> target
-
-      - run: npm ci --ignore-scripts
-
-      - name: Type check
-        run: npm run typecheck
-
-      - name: Lint (ESLint)
-        run: npm run lint
-
-      # Thresholds in vitest.config.ts; the summary is printed in the log.
-      - name: Interface tests, with coverage thresholds
-        run: npm run test:coverage
+          # Part of the cache key. rust-cache saves nothing when an entry with
+          # the same key exists, and the key only follows Cargo.toml/Cargo.lock
+          # and the toolchain: a newly installed tool (cargo-deny,
+          # cargo-llvm-cov) or a new build (target/llvm-cov-target) is only
+          # kept once the key changes. Bump it in that case.
+          key: v1
 
       # Tauri embeds the built interface: Rust needs dist/ to compile.
+      - run: npm ci --ignore-scripts
+
       - name: Build the interface
         run: npm run build
-
-      - name: npm dependency audit
-        run: npm audit --audit-level=high
 
       - name: Rust formatting
         working-directory: src-tauri
