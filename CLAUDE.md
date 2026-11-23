@@ -17,10 +17,14 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
 ## Commandes
 
 - Installer : `npm install`
-- Tests : `npm test`, puis `cargo test` dans `src-tauri`
+- Tests : `npm test`, puis `cargo test --locked` dans `src-tauri`
 - Typage : `npm run typecheck`
 - Lint / format : `npm run lint`, puis dans `src-tauri` : `cargo fmt` et
-  `cargo clippy --all-targets -- -D warnings`
+  `cargo clippy --locked --all-targets -- -D warnings`
+- Crates Rust (failles, licences, sources, doublons) : `cargo deny --locked check` dans
+  `src-tauri`, réglé par `src-tauri/deny.toml`. Une nouvelle crate sous une licence
+  absente de la liste fait échouer la CI : demande-moi avant de l'ajouter. Installer
+  l'outil : `cargo install cargo-deny --locked --version 0.22.0`, la version de la CI.
 - Lancer en local : `npm run tauri dev`
 - Interface seule dans le navigateur intégré de Claude : `preview_start` avec `kanade-web`
   (`npm run dev` sur le port 1430, pour ne pas gêner `tauri dev` sur le 1420). L'entrée est
@@ -59,6 +63,8 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   Pour un installeur local sans clé :
   `npm run tauri build -- --config src-tauri/tauri.unsigned.conf.json`.
 - Interface en français, code et commits en anglais.
+- Pas de code `unsafe` dans Kanade : `#![forbid(unsafe_code)]` en tête de `lib.rs` et
+  `main.rs`. Il ne se contourne pas avec un `allow`.
 - Icône : la source est `app-icon.svg`. Pour la changer, `npm run tauri icon app-icon.svg`,
   puis supprimer `src-tauri/icons/android` et `src-tauri/icons/ios` (app Windows seulement).
   Cargo ne voit pas le changement d'icône : `cargo clean -p kanade` dans `src-tauri` avant

@@ -1,0 +1,55 @@
+# cargo-deny: checks the Rust dependencies on every push (CI, job `checks`).
+#   cargo deny --locked check      (in src-tauri)
+# https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# Kanade only ships for Windows: the Linux and macOS crates in Cargo.lock
+# (GTK, WebKitGTK, Cocoa...) never end up in the app.
+targets = ["x86_64-pc-windows-msvc"]
+
+[advisories]
+# RustSec advisories. A vulnerability fails, whichever crate it is in.
+# "Unmaintained" and "unsound" only fail for the crates Kanade picks itself
+# (Cargo.toml); deeper ones come with Tauri and wait for its updates.
+unmaintained = "workspace"
+unsound = "workspace"
+yanked = "deny"
+ignore = []
+
+[licenses]
+# The licences of the current dependencies, all permissive except MPL-2.0
+# (copyleft limited to the files of those crates, which Kanade does not
+# modify). A new crate with another licence fails: decide, then add it here.
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "BSD-3-Clause",
+  "CC0-1.0",
+  "ISC",
+  "MIT",
+  "MIT-0",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+confidence-threshold = 0.9
+
+[licenses.private]
+# Kanade itself is not published on crates.io (publish = false).
+ignore = true
+
+[bans]
+# Two versions of one crate make the app bigger. Tauri brings many of them,
+# so they are reported without failing.
+multiple-versions = "warn"
+# A "*" version would take any release, including a breaking or hostile one.
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+# Only crates.io: no other registry, no git repository.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
