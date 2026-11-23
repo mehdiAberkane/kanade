@@ -4,8 +4,9 @@
 # - rust, on Windows (the platform Kanade runs on): format, Clippy, tests with
 #   a coverage threshold, cargo-deny;
 # - workflows: an audit of the workflows themselves (zizmor);
-# - dependency-review, on pull requests: the new dependencies.
-# The four are required on main. The release workflow runs it too and only
+# - dependency-review, on pull requests: the new dependencies;
+# - installer, after a merge on main only: the packaged app as an artifact.
+# The first four are required on main. The release workflow runs it too and only
 # publishes when it passes.
 # Actions are pinned to a commit SHA; Dependabot updates them.
 name: CI
@@ -119,6 +120,47 @@ jobs:
         run: |
           [ "$(cargo deny --version 2>/dev/null)" = "cargo-deny 0.22.0" ] || cargo install cargo-deny --locked --version 0.22.0
           cargo deny --locked check
+
+  # After each merge on main: the whole app, packaged (MSI and setup .exe),
+  # attached to the run (Summary › Artifacts) to try a card in « A verifier »
+  # without building locally. Not on pull requests (time), nor during a
+  # release, which builds and signs its own. Not required on main.
+  installer:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      # Its own cache entry (the key includes the job): the release build.
+      - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri -> target
+          key: v1
+
+      - run: npm ci --ignore-scripts
+
+      # tauri.unsigned.conf.json: no update signature, the signing key only
+      # reaches release.yml. The last --locked goes to cargo build.
+      - name: Build the installers
+        run: npm run tauri build -- --config src-tauri/tauri.unsigned.conf.json -- --locked
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kanade-windows-${{ github.sha }}
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 30
 
   # Static audit of the workflows (injections, permissions, credentials left
   # in the checkout, unpinned actions...). Fails on any finding.
