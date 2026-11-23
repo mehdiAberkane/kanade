@@ -1,0 +1,98 @@
+# Builds Kanade for Windows when a version tag (v1.2.3) is pushed, then
+# publishes a GitHub Release with the signed installer and the latest.json that
+# the in-app updater reads (src-tauri/tauri.conf.json, plugins.updater).
+# `npm run release` pushes the tag.
+#
+# This workflow holds the update signing key: whoever runs code here can sign
+# an update every installed Kanade accepts. Hence:
+# - actions are pinned to a commit SHA (a tag can be moved), version in the
+#   comment; Dependabot (.github/dependabot.yml) proposes the updates;
+# - npm install scripts don't run;
+# - the app is built (interface, then Rust) in a step without the key; the
+#   step that holds the key only bundles and signs what is already built:
+#   beforeBuildCommand is emptied there and cargo finds everything up to date,
+#   so no dependency code (vite, plugins, build.rs, macros) runs next to the key;
+# - no cache is restored in the build job (a CI run could have written it);
+# - only the two steps that sign receive the key;
+# - the checks of ci.yml (tests, Clippy, audits) must pass first;
+# - only the repository admin can create, move or delete a v* tag (ruleset
+#   "Release tags").
+# Replacing a leaked key: docs/cle-de-signature.md.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+jobs:
+  # Same checks as on every push: nothing is built or signed unless they pass.
+  checks:
+    # Same commit as this run either way; './' is the form Todoom's release
+    # already runs with, so zizmor's suggestion of '$/' is not followed.
+    uses: ./.github/workflows/ci.yml # zizmor: ignore[self-repository]
+    permissions:
+      contents: read
+
+  build:
+    needs: checks
+    runs-on: windows-latest
+    permissions:
+      contents: write # create the release and upload the installer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          # No cache here (npm, Rust): a cache is restored next to the signing
+          # key, and CI runs can write it. The release builds from scratch.
+          package-manager-cache: false
+
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      - run: npm ci --ignore-scripts
+
+      # Fails in seconds, before the long build, when the update signing secrets
+      # are missing or don't match. Errors go to annotations, which are readable
+      # without signing in (unlike the job logs).
+      - name: Check update signing secrets
+        shell: bash
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          [ -n "$KEY" ] || { echo "::error::Secret TAURI_SIGNING_PRIVATE_KEY absent ou vide"; exit 1; }
+          [ -n "$PASSWORD" ] || { echo "::error::Secret TAURI_SIGNING_PRIVATE_KEY_PASSWORD absent ou vide"; exit 1; }
+          echo probe > "$RUNNER_TEMP/probe.txt"
+          if ! out=$(npx tauri signer sign -k "$KEY" -p "$PASSWORD" "$RUNNER_TEMP/probe.txt" 2>&1); then
+            echo "::error::Clé de signature refusée : $(echo "$out" | tail -n 2 | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "Clé et mot de passe de signature valides."
+
+      # Everything that runs dependency code, without the key: the interface,
+      # then the Rust build with the very config of the signing step (same
+      # config, so cargo has nothing left to compile there).
+      - name: Build without the signing key
+        shell: bash
+        run: |
+          npm run build
+          npx tauri build --no-bundle --config src-tauri/tauri.sign.conf.json
+
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Kanade ${{ github.ref_name }}
+          releaseBody: Mise à jour installable depuis Réglages › Mises à jour, dans Kanade.
+          releaseDraft: false
+          prerelease: false
+          # Already built: no beforeBuildCommand (src-tauri/tauri.sign.conf.json).
+          args: --bundles msi --config src-tauri/tauri.sign.conf.json

@@ -10,7 +10,12 @@ Il faut Node 22 et Rust (rustup).
 ```bash
 npm install
 npm run tauri dev      # l'app de bureau
-npm run tauri build    # installeur (.msi / .exe)
+```
+
+Un installeur local (.msi / .exe), sans la clé de signature des mises à jour :
+
+```bash
+npm run tauri build -- --config src-tauri/tauri.unsigned.conf.json
 ```
 
 ## Tester
@@ -20,3 +25,17 @@ npm run typecheck && npm run lint && npm test
 npm run build          # Rust embarque l'interface construite
 cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
+
+## Mises à jour
+
+Kanade cherche une nouvelle version sur les Releases GitHub du dépôt : au lancement, puis
+toutes les 6 heures, ou avec le bouton de Réglages › Mises à jour. Il ne l'installe que
+si elle est signée avec la clé de Kanade.
+
+`npm run release` (ou `minor`, `major`, `x.y.z`) monte la version, puis crée et pousse le
+tag. GitHub Actions vérifie le code, construit et signe l'installeur MSI, puis publie la
+Release que Kanade propose d'installer. La clé de signature, sa sauvegarde et son
+remplacement sont décrits dans [`docs/cle-de-signature.md`](docs/cle-de-signature.md).
+
+L'installeur n'a pas de signature de code Windows. SmartScreen affiche donc une alerte
+quand on lance pour la première fois l'installeur téléchargé depuis GitHub.
