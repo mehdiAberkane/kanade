@@ -1,3 +1,7 @@
+// Kanade reads files that come from anywhere: no unsafe code of its own,
+// the memory-safety risks stay in the crates it depends on.
+#![forbid(unsafe_code)]
+
 pub mod library;
 
 /// Version of the app, shown in the interface.

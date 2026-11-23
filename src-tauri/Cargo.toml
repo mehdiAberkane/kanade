@@ -4,6 +4,8 @@ version = "0.2.0"
 description = "Kanade - music library manager for Windows"
 authors = ["devsecops-force"]
 edition = "2024"
+# Not a library for crates.io: an app, shipped as an installer.
+publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

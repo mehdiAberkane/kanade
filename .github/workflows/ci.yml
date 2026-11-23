@@ -1,5 +1,5 @@
 # Checks every push to main and every pull request: interface (types, lint,
-# tests, build, npm audit) then Rust (format, Clippy, tests, cargo audit), an
+# tests, build, npm audit) then Rust (format, Clippy, tests, cargo-deny), an
 # audit of the workflows themselves (zizmor) and, on pull requests, a review
 # of the new dependencies. The three jobs are required on main. The release
 # workflow runs it too and only publishes when it passes.
@@ -64,20 +64,25 @@ jobs:
         working-directory: src-tauri
         run: cargo fmt --check
 
+      # --locked: fails when Cargo.lock is out of date with Cargo.toml instead
+      # of quietly updating it, as npm ci does for npm.
       - name: Clippy
         working-directory: src-tauri
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Rust tests
         working-directory: src-tauri
-        run: cargo test
+        run: cargo test --locked
 
-      - name: Rust dependency audit
+      # Known vulnerabilities, allowed licences, crate sources and duplicated
+      # versions: src-tauri/deny.toml. The binary is cached by rust-cache;
+      # raise the version here to update it (Dependabot does not see it).
+      - name: Rust dependency checks (cargo-deny)
         working-directory: src-tauri
         shell: bash
         run: |
-          cargo audit --version >/dev/null 2>&1 || cargo install cargo-audit --locked --version 0.23.0
-          cargo audit
+          [ "$(cargo deny --version 2>/dev/null)" = "cargo-deny 0.22.0" ] || cargo install cargo-deny --locked --version 0.22.0
+          cargo deny --locked check
 
   # Static audit of the workflows (injections, permissions, credentials left
   # in the checkout, unpinned actions...). Fails on any finding.

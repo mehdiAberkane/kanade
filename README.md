@@ -23,8 +23,11 @@ npm run tauri build -- --config src-tauri/tauri.unsigned.conf.json
 ```bash
 npm run typecheck && npm run lint && npm test
 npm run build          # Rust embarque l'interface construite
-cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+cd src-tauri && cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked
+cargo deny --locked check   # failles, licences et sources des crates (deny.toml)
 ```
+
+`cargo-deny` s'installe avec `cargo install cargo-deny --locked --version 0.22.0`.
 
 ## Mises à jour
 
