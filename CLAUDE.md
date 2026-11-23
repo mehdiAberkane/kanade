@@ -39,6 +39,10 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   dans `.claude/launch.json` du dépôt, et dans celui de `C:\xampp\htdocs` pour les sessions
   ouvertes là. Le faux contrôle des mises à jour se choisit dans l'adresse :
   `?update=available`, `?update=offline` ou `?update=unpublished` (à jour sinon).
+- Installeur de test : après chaque fusion sur `main`, le job `installer` de la CI joint
+  au run un MSI et un setup `.exe` non signés (artefact `kanade-windows-<commit>`, 30
+  jours) ; la commande pour les télécharger est dans le README. Ce job ne tourne pas sur
+  les PR et n'est pas exigé.
 - Publier une version : `npm run release` (ou `minor`, `major`, `x.y.z`) depuis `main` à
   jour, **seulement quand je le demande**. Le tag lance `release.yml`, qui vérifie,
   construit et signe l'installeur MSI, puis publie la Release que l'app propose

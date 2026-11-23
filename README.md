@@ -18,6 +18,14 @@ Un installeur local (.msi / .exe), sans la clé de signature des mises à jour :
 npm run tauri build -- --config src-tauri/tauri.unsigned.conf.json
 ```
 
+Sans rien compiler : après chaque fusion sur `main`, la CI joint au run un MSI et un
+setup `.exe` (artefact `kanade-windows-<commit>`, gardé 30 jours). Pour récupérer ceux du
+dernier run de `main` :
+
+```powershell
+gh run download (gh run list -R mehdiAberkane/kanade -w CI -b main -e push -s success -L 1 --json databaseId -q '.[0].databaseId') -R mehdiAberkane/kanade -D "$env:TEMP\kanade-ci"
+```
+
 ## Tester
 
 ```bash
