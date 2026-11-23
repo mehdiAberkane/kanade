@@ -18,6 +18,12 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
 
 - Installer : `npm install`
 - Tests : `npm test`, puis `cargo test --locked` dans `src-tauri`
+- Couverture, comme la CI : `npm run test:coverage` (seuils dans `vitest.config.ts`),
+  puis dans `src-tauri` : `cargo llvm-cov --locked --fail-under-lines 89` (seuil dans
+  `ci.yml`). Les seuils sont posés juste sous le niveau atteint : monte-les quand des
+  tests s'ajoutent, ne les baisse jamais. Installer l'outil :
+  `rustup component add llvm-tools-preview` puis
+  `cargo install cargo-llvm-cov --locked --version 0.9.2`.
 - Typage : `npm run typecheck`
 - Lint / format : `npm run lint`, puis dans `src-tauri` : `cargo fmt` et
   `cargo clippy --locked --all-targets -- -D warnings`

@@ -27,7 +27,16 @@ cd src-tauri && cargo fmt --check && cargo clippy --locked --all-targets -- -D w
 cargo deny --locked check   # failles, licences et sources des crates (deny.toml)
 ```
 
-`cargo-deny` s'installe avec `cargo install cargo-deny --locked --version 0.22.0`.
+La CI mesure aussi la couverture et échoue si elle baisse sous un seuil :
+
+```bash
+npm run test:coverage                              # seuils : vitest.config.ts
+cd src-tauri && cargo llvm-cov --locked --fail-under-lines 89
+```
+
+Outils : `cargo install cargo-deny --locked --version 0.22.0`,
+`rustup component add llvm-tools-preview` et
+`cargo install cargo-llvm-cov --locked --version 0.9.2`.
 
 ## Mises à jour
 
