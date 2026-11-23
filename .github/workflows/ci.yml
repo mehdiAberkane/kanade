@@ -1,7 +1,8 @@
 # Checks every push to main and every pull request: interface (types, lint,
 # tests, build, npm audit) then Rust (format, Clippy, tests, cargo audit), an
 # audit of the workflows themselves (zizmor) and, on pull requests, a review
-# of the new dependencies. The three jobs are required on main.
+# of the new dependencies. The three jobs are required on main. The release
+# workflow runs it too and only publishes when it passes.
 # Actions are pinned to a commit SHA; Dependabot updates them.
 name: CI
 
@@ -9,6 +10,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read

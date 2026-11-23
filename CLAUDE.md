@@ -25,7 +25,12 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
 - Interface seule dans le navigateur intégré de Claude : `preview_start` avec `kanade-web`
   (`npm run dev` sur le port 1430, pour ne pas gêner `tauri dev` sur le 1420). L'entrée est
   dans `.claude/launch.json` du dépôt, et dans celui de `C:\xampp\htdocs` pour les sessions
-  ouvertes là.
+  ouvertes là. Le faux contrôle des mises à jour se choisit dans l'adresse :
+  `?update=available`, `?update=offline` ou `?update=unpublished` (à jour sinon).
+- Publier une version : `npm run release` (ou `minor`, `major`, `x.y.z`) depuis `main` à
+  jour, **seulement quand je le demande**. Le tag lance `release.yml`, qui vérifie,
+  construit et signe l'installeur MSI, puis publie la Release que l'app propose
+  d'installer. Clé de signature : `docs/cle-de-signature.md`.
 
 ## Vérifier sans prendre la main sur le PC
 
@@ -50,6 +55,9 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   `cargo clippy` ou `cargo test` (sinon `../dist` manque).
 - Cargo est dans `%USERPROFILE%\.cargo\bin` : l'ajouter au PATH du shell s'il n'y est pas.
 - La CI tourne sur Windows (job `checks`), comme l'app : pas de paquets système à installer pour Tauri.
+- `tauri build` demande la clé de signature, car il écrit les fichiers de mise à jour.
+  Pour un installeur local sans clé :
+  `npm run tauri build -- --config src-tauri/tauri.unsigned.conf.json`.
 - Interface en français, code et commits en anglais.
 - Icône : la source est `app-icon.svg`. Pour la changer, `npm run tauri icon app-icon.svg`,
   puis supprimer `src-tauri/icons/android` et `src-tauri/icons/ios` (app Windows seulement).
