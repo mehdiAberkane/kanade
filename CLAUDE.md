@@ -21,7 +21,7 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
 - Installer : `npm install`
 - Tests : `npm test`, puis `cargo test --locked` dans `src-tauri`
 - Couverture, comme la CI : `npm run test:coverage` (seuils dans `vitest.config.ts`),
-  puis dans `src-tauri` : `cargo llvm-cov --locked --fail-under-lines 94` (seuil dans
+  puis dans `src-tauri` : `cargo llvm-cov --locked --fail-under-lines 95` (seuil dans
   `ci.yml`). Les seuils sont posés juste sous le niveau atteint : monte-les quand des
   tests s'ajoutent, ne les baisse jamais. Installer l'outil :
   `rustup component add llvm-tools-preview` puis
@@ -54,7 +54,11 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   ouvertes là. Le faux contrôle des mises à jour se choisit dans l'adresse :
   `?update=available`, `?update=offline` ou `?update=unpublished` (à jour sinon). L'état
   de la base aussi : `?db=restored`, `?db=empty`, `?db=newer` ou `?db=failed` (prête
-  sinon). Les deux se combinent (`?update=available&db=restored`).
+  sinon), et les bibliothèques : `?libraries=empty` (trois d'exemple sinon, dont une
+  hors ligne et une avec des fichiers OneDrive). Ils se combinent
+  (`?update=available&db=restored`). Le faux sélecteur de dossier (`src/dev/mockLibraries.ts`)
+  donne un dossier par clic, dont certains refusés, et les faux scans jouent leur
+  progression en deux secondes.
 - Installeur de test : après chaque fusion sur `main`, le job `installer` de la CI joint
   au run un MSI et un setup `.exe` non signés (artefact `kanade-windows-<commit>`, 30
   jours) ; la commande pour les télécharger est dans le README. Ce job ne tourne pas sur
@@ -113,6 +117,20 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   jamais redonné. Les commandes Rust et l'interface désignent un morceau par cet
   identifiant, jamais par son chemin. Un fichier manquant ou illisible reste dans l'index,
   marqué, pendant 30 jours (`KEEP_GONE_MS`) avant d'en sortir.
+- Bibliothèques (`library/libraries.rs`) : un morceau appartient à la bibliothèque dont la
+  racine contient son chemin ; deux racines ne se chevauchent jamais (même dossier, l'un
+  dans l'autre), et le disque système ou le profil entier sont refusés.
+  - **L'interface ne donne jamais de chemin** : un dossier vient du sélecteur ouvert côté
+    Rust (`rfd`, dans `commands.rs`) ou d'un glisser-déposer, que Windows remet au Rust.
+    Les commandes prennent l'identifiant de la bibliothèque.
+  - Les scans tournent sur un fil à part (`library/scanner.rs`), un à la fois, avec
+    progression (événements Tauri) et annulation. Retirer ou déplacer une bibliothèque
+    passe par `Scanner::without_scan_of`, pour qu'aucun scan ne réécrive ses morceaux.
+  - Les commandes se testent par l'IPC de Tauri (runtime de test, `tauri` avec `test` en
+    dev-dependency) ; les dialogues passent par le trait `Dialogs`, simulé dans les tests.
+    `build.rs` met le manifeste Windows (`windows-app-manifest.xml`) dans tous les
+    binaires, ceux des tests compris : sans lui, le binaire de test ne démarre pas
+    (`STATUS_ENTRYPOINT_NOT_FOUND`).
 - Base de données (`src-tauri/src/store`) : un seul fichier, `kanade.db`, dans
   `%LOCALAPPDATA%\fr.devsecopsforce.kanade` (jamais un dossier synchronisé), ouvert au
   lancement. Tout y est précieux (morceaux et leurs identifiants, puis données de
