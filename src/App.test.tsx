@@ -56,13 +56,17 @@ describe("App", () => {
   it("shows the version the Rust side returns on the home screen", async () => {
     backend();
     const { screen } = await renderApp();
-    expect(await screen.findByText(`Gestionnaire de bibliothèque musicale — v${VERSION}`)).toBeTruthy();
+    expect(
+      await screen.findByText(`Gestionnaire de bibliothèque musicale — v${VERSION}`),
+    ).toBeTruthy();
   });
 
   it("shows no version, and a placeholder in the settings, when the Rust side fails", async () => {
     const { calls } = backend("none", new Error("backend unavailable"));
     const { screen, user, waitFor } = await renderApp();
-    await waitFor(() => expect(calls).toContain("app_version"));
+    await waitFor(() => {
+      expect(calls).toContain("app_version");
+    });
     expect(screen.getByText("Gestionnaire de bibliothèque musicale")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Réglages" }));
     expect(screen.getByText("…")).toBeTruthy();
@@ -109,13 +113,22 @@ describe("Settings › Mises à jour", () => {
     const { calls } = backend("available");
     const { screen, user, waitFor } = await openSettings();
     await user.click(screen.getByRole("button", { name: "Vérifier les mises à jour" }));
-    const install = await screen.findByRole("button", { name: `Installer la version ${MOCK_NEXT_VERSION}` });
+    const install = await screen.findByRole("button", {
+      name: `Installer la version ${MOCK_NEXT_VERSION}`,
+    });
     // The top bar offers it too.
-    expect(screen.getByRole("button", { name: `⬆ Mettre à jour vers ${MOCK_NEXT_VERSION}` })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: `⬆ Mettre à jour vers ${MOCK_NEXT_VERSION}` }),
+    ).toBeTruthy();
 
     await user.click(install);
     expect(await screen.findAllByText(/^Téléchargement…/)).not.toHaveLength(0);
-    await waitFor(() => expect(calls).toContain("plugin:process|restart"), { timeout: 3000 });
+    await waitFor(
+      () => {
+        expect(calls).toContain("plugin:process|restart");
+      },
+      { timeout: 3000 },
+    );
     expect(calls).toContain("plugin:updater|download_and_install");
   });
 });
@@ -128,7 +141,9 @@ describe("Automatic update check", () => {
     expect(screen.queryByRole("button", { name: /Mettre à jour vers/ })).toBeNull();
     await act(() => vi.advanceTimersByTimeAsync(5_000));
     vi.useRealTimers();
-    expect(await screen.findByRole("button", { name: `⬆ Mettre à jour vers ${MOCK_NEXT_VERSION}` })).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: `⬆ Mettre à jour vers ${MOCK_NEXT_VERSION}` }),
+    ).toBeTruthy();
   });
 
   it("installs from the top bar button, which then shows the progress", async () => {
@@ -142,6 +157,11 @@ describe("Automatic update check", () => {
     // The button gives way to the progress, in the top bar.
     expect(await screen.findByText(/^Téléchargement…/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Mettre à jour vers/ })).toBeNull();
-    await waitFor(() => expect(calls).toContain("plugin:process|restart"), { timeout: 3000 });
+    await waitFor(
+      () => {
+        expect(calls).toContain("plugin:process|restart");
+      },
+      { timeout: 3000 },
+    );
   });
 });

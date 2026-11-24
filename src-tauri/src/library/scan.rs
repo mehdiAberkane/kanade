@@ -98,8 +98,7 @@ pub fn scan_folder(index: &mut Index, root: &Path) -> Result<ScanReport, Library
                 report.errors.push(ScanError {
                     path: e
                         .path()
-                        .map(|p| p.display().to_string())
-                        .unwrap_or_default(),
+                        .map_or_else(String::new, |p| p.display().to_string()),
                     message: e.to_string(),
                 });
                 continue;

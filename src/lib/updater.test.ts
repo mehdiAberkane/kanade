@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import type { DownloadEvent } from "@tauri-apps/plugin-updater";
-import { checkFailureText, createUpdater, NBSP, statusLine, type FoundUpdate, type UpdateSource } from "./updater";
+import {
+  checkFailureText,
+  createUpdater,
+  NBSP,
+  statusLine,
+  type FoundUpdate,
+  type UpdateSource,
+} from "./updater";
 
 const NO_RELEASE = "Could not fetch a valid release JSON from the remote";
 
@@ -8,20 +15,17 @@ const NO_RELEASE = "Could not fetch a valid release JSON from the remote";
 function fakeUpdate(version: string, events: DownloadEvent[] = [], fail?: string): FoundUpdate {
   return {
     version,
-    downloadAndInstall: vi.fn(async (onEvent?: (event: DownloadEvent) => void) => {
+    downloadAndInstall: vi.fn((onEvent?: (event: DownloadEvent) => void) => {
       for (const event of events) onEvent?.(event);
-      if (fail) throw fail;
+      return fail ? Promise.reject(new Error(fail)) : Promise.resolve();
     }),
   };
 }
 
 function source(found: FoundUpdate | null | Error): UpdateSource {
   return {
-    check: vi.fn(async () => {
-      if (found instanceof Error) throw found;
-      return found;
-    }),
-    relaunch: vi.fn(async () => {}),
+    check: vi.fn(() => (found instanceof Error ? Promise.reject(found) : Promise.resolve(found))),
+    relaunch: vi.fn(() => Promise.resolve()),
   };
 }
 
@@ -113,7 +117,10 @@ describe("createUpdater", () => {
       event: "Progress" as const,
       data: { chunkLength: 10 },
     }));
-    const update = fakeUpdate("0.3.0", [{ event: "Started", data: { contentLength: 10_000 } }, ...chunks]);
+    const update = fakeUpdate("0.3.0", [
+      { event: "Started", data: { contentLength: 10_000 } },
+      ...chunks,
+    ]);
     const updater = createUpdater(source(update));
     await updater.checkNow();
     const listener = vi.fn();
@@ -134,7 +141,9 @@ describe("createUpdater", () => {
     const updater = createUpdater(src);
     await updater.checkNow();
     void updater.install();
-    await vi.waitFor(() => expect(src.relaunch).toHaveBeenCalled());
+    await vi.waitFor(() => {
+      expect(src.relaunch).toHaveBeenCalled();
+    });
     expect(updater.getState().status).toEqual({ kind: "installing", progress: null });
   });
 
@@ -171,7 +180,10 @@ describe("createUpdater", () => {
 
   it("forgets an update that GitHub no longer offers", async () => {
     let offered: FoundUpdate | null = fakeUpdate("0.3.0");
-    const updater = createUpdater({ check: async () => offered, relaunch: async () => {} });
+    const updater = createUpdater({
+      check: () => Promise.resolve(offered),
+      relaunch: () => Promise.resolve(),
+    });
     await updater.checkInBackground();
     expect(updater.getState().available).toBe("0.3.0");
     offered = null;
@@ -202,7 +214,9 @@ describe("statusLine", () => {
 
   it("shows the download progress, then the install", () => {
     expect(statusLine({ kind: "installing", progress: null })?.text).toBe("Téléchargement…");
-    expect(statusLine({ kind: "installing", progress: 0.42 })?.text).toBe(`Téléchargement… 42${NBSP}%`);
+    expect(statusLine({ kind: "installing", progress: 0.42 })?.text).toBe(
+      `Téléchargement… 42${NBSP}%`,
+    );
     expect(statusLine({ kind: "installing", progress: 1 })?.text).toBe("Installation…");
   });
 });

@@ -1,0 +1,8 @@
+# Prettier formats the interface code, the configs and the workflows.
+# Rust has cargo fmt; the docs keep their own layout; the rest is generated.
+dist
+coverage
+node_modules
+package-lock.json
+src-tauri
+*.md

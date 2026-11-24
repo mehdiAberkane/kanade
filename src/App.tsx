@@ -15,7 +15,9 @@ function App() {
   useEffect(() => {
     invoke<string>("app_version")
       .then(setVersion)
-      .catch(() => setVersion(""));
+      .catch(() => {
+        setVersion("");
+      });
   }, []);
 
   return (
@@ -47,13 +49,20 @@ function App() {
   );
 }
 
-function NavButton(props: { current: Page; page: Page; onSelect: (page: Page) => void; children: string }) {
+function NavButton(props: {
+  current: Page;
+  page: Page;
+  onSelect: (page: Page) => void;
+  children: string;
+}) {
   const active = props.current === props.page;
   return (
     <button
       className={`nav-btn${active ? " active" : ""}`}
       aria-current={active ? "page" : undefined}
-      onClick={() => props.onSelect(props.page)}
+      onClick={() => {
+        props.onSelect(props.page);
+      }}
     >
       {props.children}
     </button>

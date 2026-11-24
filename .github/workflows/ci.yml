@@ -1,6 +1,6 @@
 # Checks every push to main and every pull request, in parallel:
-# - interface, on Ubuntu (faster to start): types, lint, tests with coverage
-#   thresholds, npm audit;
+# - interface, on Ubuntu (faster to start): types, lint, formatting, tests
+#   with coverage thresholds, npm audit;
 # - rust, on Windows (the platform Kanade runs on): format, Clippy, tests with
 #   a coverage threshold, cargo-deny;
 # - workflows: an audit of the workflows themselves (zizmor);
@@ -42,8 +42,13 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      # Type-aware strict rules and accessibility: eslint.config.js.
       - name: Lint (ESLint)
         run: npm run lint
+
+      # The interface's counterpart of cargo fmt: `npm run format` fixes it.
+      - name: Formatting (Prettier)
+        run: npm run format:check
 
       # Thresholds in vitest.config.ts; the summary is printed in the log.
       - name: Interface tests, with coverage thresholds

@@ -8,14 +8,14 @@ import type { DownloadEvent } from "@tauri-apps/plugin-updater";
 /** A newer version found on GitHub (the plugin's Update has this shape). */
 export interface FoundUpdate {
   version: string;
-  downloadAndInstall(onEvent?: (event: DownloadEvent) => void): Promise<void>;
+  downloadAndInstall: (onEvent?: (event: DownloadEvent) => void) => Promise<void>;
 }
 
 export interface UpdateSource {
   /** The newer version, or null when the installed one is the latest. */
-  check(): Promise<FoundUpdate | null>;
+  check: () => Promise<FoundUpdate | null>;
   /** Restarts Kanade once the new version is installed. */
-  relaunch(): Promise<void>;
+  relaunch: () => Promise<void>;
 }
 
 export type UpdateStatus =
@@ -55,10 +55,12 @@ export function createUpdater(source: UpdateSource) {
     return found;
   };
 
+  // Arrow functions, not methods: the screens pass them around on their own
+  // (useSyncExternalStore, onClick), without the object.
   return {
     getState: () => state,
 
-    subscribe(listener: () => void) {
+    subscribe: (listener: () => void) => {
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
@@ -66,7 +68,7 @@ export function createUpdater(source: UpdateSource) {
     },
 
     /** The automatic check: silent when it fails, the next one will try again. */
-    async checkInBackground() {
+    checkInBackground: async () => {
       if (busy()) return;
       try {
         await lookup();
@@ -76,7 +78,7 @@ export function createUpdater(source: UpdateSource) {
     },
 
     /** The check asked for with the button: it says what it found. */
-    async checkNow() {
+    checkNow: async () => {
       if (busy()) return;
       set({ status: { kind: "checking" } });
       try {
@@ -88,7 +90,7 @@ export function createUpdater(source: UpdateSource) {
     },
 
     /** Downloads and installs the version found, then restarts Kanade. */
-    async install() {
+    install: async () => {
       const update = found;
       if (!update || busy()) return;
       let total = 0;
@@ -135,13 +137,21 @@ export function statusLine(
     case "upToDate":
       return { text: "✓ Kanade est à jour", tone: "ok" };
     case "checkFailed":
-      return { text: `⚠ ${checkFailureText(status.message)}`, tone: "error", detail: status.message };
+      return {
+        text: `⚠ ${checkFailureText(status.message)}`,
+        tone: "error",
+        detail: status.message,
+      };
     case "installing":
       if (status.progress === null) return { text: "Téléchargement…", tone: "info" };
       if (status.progress >= 1) return { text: "Installation…", tone: "info" };
       return { text: `Téléchargement… ${Math.round(status.progress * 100)}${NBSP}%`, tone: "info" };
     case "installFailed":
-      return { text: "⚠ La mise à jour a échoué, réessaie.", tone: "error", detail: status.message };
+      return {
+        text: "⚠ La mise à jour a échoué, réessaie.",
+        tone: "error",
+        detail: status.message,
+      };
   }
 }
 
@@ -151,6 +161,7 @@ export function statusLine(
  * release JSON from the remote".
  */
 export function checkFailureText(message: string): string {
-  if (/valid release JSON/i.test(message)) return "Aucune version publiée sur GitHub pour l'instant.";
+  if (/valid release JSON/i.test(message))
+    return "Aucune version publiée sur GitHub pour l'instant.";
   return "Impossible de joindre GitHub, réessaie plus tard.";
 }

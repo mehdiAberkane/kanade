@@ -56,9 +56,18 @@ edit("src-tauri/Cargo.toml", /^version = "[^"]+"/m, `version = "${next}"`);
 edit("src-tauri/Cargo.lock", /(name = "kanade"\r?\nversion = )"[^"]+"/, `$1"${next}"`);
 
 console.log(`${conf.version} -> ${next}`);
-git("add", "src-tauri/tauri.conf.json", "package.json", "package-lock.json", "src-tauri/Cargo.toml", "src-tauri/Cargo.lock");
+git(
+  "add",
+  "src-tauri/tauri.conf.json",
+  "package.json",
+  "package-lock.json",
+  "src-tauri/Cargo.toml",
+  "src-tauri/Cargo.lock",
+);
 git("commit", "-q", "-m", `Release v${next}`);
 git("tag", `v${next}`);
 git("push", "origin", "HEAD", `v${next}`);
-console.log(`\nv${next} est partie : GitHub vérifie, compile et signe l'installeur (~10 min), puis Kanade proposera la mise à jour.`);
+console.log(
+  `\nv${next} est partie : GitHub vérifie, compile et signe l'installeur (~10 min), puis Kanade proposera la mise à jour.`,
+);
 console.log("Suivi : https://github.com/mehdiAberkane/kanade/actions/workflows/release.yml");
