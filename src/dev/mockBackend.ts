@@ -5,6 +5,7 @@
 import { mockIPC } from "@tauri-apps/api/mocks";
 import type { InvokeArgs } from "@tauri-apps/api/core";
 import type { DownloadEvent } from "@tauri-apps/plugin-updater";
+import type { DatabaseStatus } from "../lib/database";
 
 export const MOCK_VERSION = "0.0.0-dev";
 export const MOCK_NEXT_VERSION = "0.0.1-dev";
@@ -19,6 +20,44 @@ export type UpdateScenario = "none" | "available" | "offline" | "unpublished";
 export function updateScenario(search: string): UpdateScenario {
   const value = new URLSearchParams(search).get("update");
   return value === "available" || value === "offline" || value === "unpublished" ? value : "none";
+}
+
+/**
+ * How the fake database opened, chosen in the address: ?db=restored,
+ * ?db=empty (damaged, no backup), ?db=newer (from a newer Kanade) or
+ * ?db=failed. Ready by default.
+ */
+export type DatabaseScenario = "ready" | "restored" | "empty" | "newer" | "failed";
+
+export function databaseScenario(search: string): DatabaseScenario {
+  const value = new URLSearchParams(search).get("db");
+  return value === "restored" || value === "empty" || value === "newer" || value === "failed"
+    ? value
+    : "ready";
+}
+
+export interface Scenarios {
+  update?: UpdateScenario;
+  database?: DatabaseScenario;
+}
+
+const MOCK_BROKEN = String.raw`C:\Users\you\AppData\Local\fr.devsecopsforce.kanade\kanade-broken-20261124-101500.db`;
+
+/** What database_status answers for each scenario. */
+function databaseStatus(scenario: DatabaseScenario): DatabaseStatus {
+  switch (scenario) {
+    case "restored":
+      // The backup of 23 November 2026, 12:00 UTC.
+      return { state: "restored", broken: MOCK_BROKEN, backupTakenMs: Date.UTC(2026, 10, 23, 12) };
+    case "empty":
+      return { state: "started_empty", broken: MOCK_BROKEN };
+    case "newer":
+      return { state: "failed", error: { code: "newer_version", found: 3, supported: 2 } };
+    case "failed":
+      return { state: "failed", error: { code: "io", message: "Accès refusé. (os error 5)" } };
+    case "ready":
+      return { state: "ready" };
+  }
 }
 
 /** Download size and pace of the fake update: about one second. */
@@ -46,16 +85,18 @@ async function fakeDownload(args: InvokeArgs | undefined): Promise<null> {
 export function handleMockCommand(
   cmd: string,
   args?: InvokeArgs,
-  scenario: UpdateScenario = "none",
+  scenarios: Scenarios = {},
 ): unknown {
   switch (cmd) {
     case "app_version":
       return MOCK_VERSION;
+    case "database_status":
+      return databaseStatus(scenarios.database ?? "ready");
 
     // Tauri's updater plugin (src/lib/useUpdater.ts). The real one rejects
     // with a message string, like these, hence the lint exceptions.
     case "plugin:updater|check":
-      switch (scenario) {
+      switch (scenarios.update ?? "none") {
         case "available":
           return { rid: 1, currentVersion: MOCK_VERSION, version: MOCK_NEXT_VERSION, rawJson: {} };
         case "offline":
@@ -83,6 +124,9 @@ export function handleMockCommand(
 }
 
 export function installMockBackend(): void {
-  const scenario = updateScenario(window.location.search);
-  mockIPC((cmd, args) => handleMockCommand(cmd, args, scenario));
+  const scenarios: Scenarios = {
+    update: updateScenario(window.location.search),
+    database: databaseScenario(window.location.search),
+  };
+  mockIPC((cmd, args) => handleMockCommand(cmd, args, scenarios));
 }

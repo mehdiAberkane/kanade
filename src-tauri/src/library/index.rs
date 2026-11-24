@@ -1,5 +1,5 @@
-//! The local SQLite index of the tracks, kept on this PC only, never in a
-//! synced folder.
+//! The tracks in the database (`kanade.db`, see store/), kept on this PC
+//! only, never in a synced folder.
 //!
 //! Each track has an id that stays the same when its file is renamed or
 //! moved: the screens and the commands name a track by its id, and the data
@@ -12,37 +12,9 @@ use std::path::Path;
 use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params, params_from_iter};
 
+use crate::store::{self, StoreError};
+
 use super::track::{FileStamp, Track};
-
-/// Version of the schema below, stored in `PRAGMA user_version`.
-const SCHEMA_VERSION: i32 = 2;
-
-/// AUTOINCREMENT: an id is never given again, even after its track left the
-/// index, so data still pointing at it cannot land on another track.
-const SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS tracks (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    path            TEXT NOT NULL UNIQUE,
-    size            INTEGER NOT NULL,
-    modified_ms     INTEGER NOT NULL,
-    format          TEXT NOT NULL,
-    title           TEXT,
-    artist          TEXT,
-    album_artist    TEXT,
-    album           TEXT,
-    track_number    INTEGER,
-    disc_number     INTEGER,
-    year            INTEGER,
-    genre           TEXT,
-    duration_ms     INTEGER,
-    bitrate_kbps    INTEGER,
-    has_cover       INTEGER NOT NULL,
-    status          TEXT NOT NULL DEFAULT 'present'
-                    CHECK (status IN ('present', 'unreadable', 'missing')),
-    status_since_ms INTEGER,
-    status_reason   TEXT
-);
-CREATE INDEX IF NOT EXISTS tracks_by_size ON tracks (size);";
 
 /// The file's columns, in the order of `track_from_row`.
 const FILE_COLUMNS: &str = "path, size, modified_ms, format, title, artist, album_artist, album, \
@@ -128,30 +100,17 @@ pub struct Index {
 }
 
 impl Index {
-    /// Opens the index file, creating it and its schema when missing. The
-    /// parent folder must exist.
-    pub fn open(path: &Path) -> rusqlite::Result<Self> {
-        Self::init(Connection::open(path)?)
+    /// The tracks of a database already opened and migrated (store::open).
+    pub fn from_connection(conn: Connection) -> Self {
+        Self { conn }
     }
 
     /// An index that lives in memory only, for tests.
-    pub fn open_in_memory() -> rusqlite::Result<Self> {
-        Self::init(Connection::open_in_memory()?)
-    }
-
-    fn init(conn: Connection) -> rusqlite::Result<Self> {
-        let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if version > SCHEMA_VERSION {
-            return Err(rusqlite::Error::InvalidQuery);
-        }
-        if version == 1 {
-            // Version 1 named tracks by their path, and held nothing but
-            // what the files say: the next scan rebuilds it.
-            conn.execute_batch("DROP TABLE IF EXISTS tracks;")?;
-        }
-        conn.execute_batch(SCHEMA)?;
-        conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
-        Ok(Self { conn })
+    pub fn open_in_memory() -> Result<Self, StoreError> {
+        let mut conn = Connection::open_in_memory()?;
+        store::configure(&conn)?;
+        store::migrate(&mut conn)?;
+        Ok(Self::from_connection(conn))
     }
 
     /// Every indexed file under `root`, by path (compared component by
@@ -582,45 +541,5 @@ mod tests {
             .collect();
         paths.sort();
         assert_eq!(paths, [r"C:\Music\Jazz\b.flac", r"C:\Music\a.flac"]);
-    }
-
-    #[test]
-    fn the_index_file_survives_a_restart() {
-        let dir = tempfile::tempdir().unwrap();
-        let db = dir.path().join("library.db");
-        let track = sample(r"C:\Music\a.flac");
-        insert(&mut Index::open(&db).unwrap(), vec![track.clone()]);
-        let tracks = Index::open(&db).unwrap().tracks().unwrap();
-        assert_eq!(tracks.len(), 1);
-        assert_eq!(tracks[0].track, track);
-    }
-
-    #[test]
-    fn an_index_of_version_1_is_rebuilt() {
-        let dir = tempfile::tempdir().unwrap();
-        let db = dir.path().join("library.db");
-        Connection::open(&db)
-            .unwrap()
-            .execute_batch(
-                "CREATE TABLE tracks (path TEXT PRIMARY KEY NOT NULL, size INTEGER NOT NULL);
-                 INSERT INTO tracks VALUES ('old.flac', 1);
-                 PRAGMA user_version = 1;",
-            )
-            .unwrap();
-        let mut index = Index::open(&db).unwrap();
-        assert_eq!(index.count().unwrap(), 0);
-        insert(&mut index, vec![sample(r"C:\Music\a.flac")]);
-        assert_eq!(index.count().unwrap(), 1);
-    }
-
-    #[test]
-    fn refuses_an_index_from_a_newer_version() {
-        let dir = tempfile::tempdir().unwrap();
-        let db = dir.path().join("library.db");
-        Connection::open(&db)
-            .unwrap()
-            .pragma_update(None, "user_version", SCHEMA_VERSION + 1)
-            .unwrap();
-        assert!(Index::open(&db).is_err());
     }
 }
