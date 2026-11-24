@@ -5,6 +5,6 @@ pub mod index;
 pub mod scan;
 pub mod track;
 
-pub use index::Index;
-pub use scan::{LibraryError, ScanError, ScanReport, scan_folder};
+pub use index::{Index, IndexedTrack, TrackId, TrackStatus};
+pub use scan::{KEEP_GONE_MS, LibraryError, ScanError, ScanReport, scan_folder};
 pub use track::{FileStamp, Track, is_audio_file, read_track};
