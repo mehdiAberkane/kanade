@@ -300,6 +300,15 @@ export function completeView(view: TrackView | null): TrackView {
 /** Accents and case aside, numbers in natural order (« Piste 2 » before « Piste 10 »). */
 export const collator = new Intl.Collator("fr", { numeric: true, sensitivity: "base" });
 
+/**
+ * The last tie-break, code point by code point: two texts the collator
+ * takes as equal (« Strauß », « Strauss ») still get a fixed order.
+ */
+export function byCode(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
 const ARTICLE = /^(?:(?:the|an?|le|la|les)\s+|l['’]\s*)(?=\S)/i;
 
 /** « The Beatles » sorts as « Beatles »; « The » alone stays. */

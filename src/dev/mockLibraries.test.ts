@@ -199,6 +199,7 @@ describe("fake tracks", () => {
       scanOnStartup: true,
       ignoreArticles: false,
       checkUpdates: true,
+      groupFeaturing: true,
     });
     expect(await invoke("backup_before_update")).toBeNull();
   });
@@ -213,6 +214,7 @@ describe("installMockBackend", () => {
       scanOnStartup: true,
       ignoreArticles: true,
       checkUpdates: true,
+      groupFeaturing: true,
     });
   });
 });

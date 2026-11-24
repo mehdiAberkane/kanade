@@ -85,6 +85,8 @@ export interface Settings {
   ignoreArticles: boolean;
   /** Look for a new version after launch, then every 6 hours. */
   checkUpdates: boolean;
+  /** « A feat. B » filed under A, with B as a guest. */
+  groupFeaturing: boolean;
 }
 
 /** The events the Rust side sends (commands.rs). */
