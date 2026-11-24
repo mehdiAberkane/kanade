@@ -1900,7 +1900,6 @@ version = "0.2.0"
 dependencies = [
  "lofty",
  "rusqlite",
- "serde",
  "serde_json",
  "tauri",
  "tauri-build",

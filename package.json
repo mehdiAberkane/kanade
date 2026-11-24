@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "knip": "knip",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "release": "node scripts/release.mjs"
@@ -38,6 +39,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.14.0",
     "jsdom": "^31.0.1",
+    "knip": "^6.48.0",
     "prettier": "^3.10.1",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.73.0",
