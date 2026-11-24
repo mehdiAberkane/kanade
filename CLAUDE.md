@@ -21,7 +21,7 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
 - Installer : `npm install`
 - Tests : `npm test`, puis `cargo test --locked` dans `src-tauri`
 - Couverture, comme la CI : `npm run test:coverage` (seuils dans `vitest.config.ts`),
-  puis dans `src-tauri` : `cargo llvm-cov --locked --fail-under-lines 93` (seuil dans
+  puis dans `src-tauri` : `cargo llvm-cov --locked --fail-under-lines 94` (seuil dans
   `ci.yml`). Les seuils sont posés juste sous le niveau atteint : monte-les quand des
   tests s'ajoutent, ne les baisse jamais. Installer l'outil :
   `rustup component add llvm-tools-preview` puis
@@ -127,6 +127,16 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
     part, pas dans `kanade.db`.
 - Pas de code `unsafe` dans Kanade : `#![forbid(unsafe_code)]` en tête de `lib.rs` et
   `main.rs`. Il ne se contourne pas avec un `allow`.
+- Chemins Windows (`library/paths.rs`) : jamais de `Path::starts_with` ni de `==` entre
+  chemins.
+  - Une racine passe par `normalize_root` : vrai chemin du disque, casse réelle,
+    sans `\\?\`.
+  - « Ce fichier est-il sous ce dossier » passe par `is_under`, insensible à la casse.
+  - Un fichier s'ouvre par `for_io` (forme `\\?\`, qui atteint les chemins longs et les
+    noms comme `NUL.mp3`).
+  - Les fichiers « en ligne uniquement » (OneDrive…) ne sont pas lus : `is_online_only`.
+  - Dans les tests, comparer un chemin à l'index via la forme normalisée : sur GitHub, le
+    dossier temporaire a un nom court (`RUNNER~1`).
 - Fichiers audio abîmés ou hostiles (`library/track.rs`) : la lecture d'un fichier ne fait
   jamais tomber Kanade. Une panique de lofty est rattrapée : **pas de `panic = "abort"`**
   dans le profil de publication. lofty est limité à 16 Mo par élément de tag (au-delà, les

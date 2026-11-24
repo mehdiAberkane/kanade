@@ -14,6 +14,7 @@ use rusqlite::{Connection, OptionalExtension, Row, Transaction, params, params_f
 
 use crate::store::{self, StoreError};
 
+use super::paths;
 use super::track::{FileStamp, ReadErrorKind, Track};
 
 /// The file's columns, in the order of `track_from_row`.
@@ -55,6 +56,8 @@ pub struct IndexedTrack {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Known {
     pub id: TrackId,
+    /// The path as stored, which may differ in case from the one walked.
+    pub path: String,
     pub stamp: FileStamp,
     pub status: TrackStatus,
 }
@@ -128,31 +131,31 @@ impl Index {
         Ok(Self::from_connection(conn))
     }
 
-    /// Every indexed file under `root`, by path (compared component by
-    /// component: `C:\Music` does not contain `C:\Music2`).
+    /// Every indexed file under `root`, as Windows sees it (case ignored,
+    /// `C:\Music` does not contain `C:\Music2`), keyed by
+    /// `paths::compare_key`. SQL keeps the likely rows, `is_under` decides.
     pub fn known_under(&self, root: &Path) -> rusqlite::Result<HashMap<String, Known>> {
+        let root = root.to_string_lossy();
         let mut stmt = self.conn.prepare(
             "SELECT id, path, size, modified_ms, status, status_since_ms, status_reason, \
-             status_kind FROM tracks",
+             status_kind FROM tracks WHERE path LIKE ?1 ESCAPE '!'",
         )?;
-        let rows = stmt.query_map([], |r| {
-            Ok((
-                r.get::<_, String>(1)?,
-                Known {
-                    id: TrackId(r.get(0)?),
-                    stamp: FileStamp {
-                        size: r.get::<_, i64>(2)?.try_into().unwrap_or(0),
-                        modified_ms: r.get(3)?,
-                    },
-                    status: status_from_row(r, 4)?,
+        let rows = stmt.query_map([paths::like_under(&root)], |r| {
+            Ok(Known {
+                id: TrackId(r.get(0)?),
+                path: r.get(1)?,
+                stamp: FileStamp {
+                    size: r.get::<_, i64>(2)?.try_into().unwrap_or(0),
+                    modified_ms: r.get(3)?,
                 },
-            ))
+                status: status_from_row(r, 4)?,
+            })
         })?;
         let mut known = HashMap::new();
         for row in rows {
-            let (path, file) = row?;
-            if Path::new(&path).starts_with(root) {
-                known.insert(path, file);
+            let file = row?;
+            if paths::is_under(&file.path, &root) {
+                known.insert(paths::compare_key(&file.path), file);
             }
         }
         Ok(known)
@@ -627,14 +630,39 @@ mod tests {
                 sample(r"C:\Music\a.flac"),
                 sample(r"C:\Music\Jazz\b.flac"),
                 sample(r"C:\Music2\c.flac"),
+                sample(r"C:\Music_old\d.flac"),
             ],
         );
         let mut paths: Vec<String> = index
             .known_under(Path::new(r"C:\Music"))
             .unwrap()
-            .into_keys()
+            .into_values()
+            .map(|k| k.path)
             .collect();
         paths.sort();
         assert_eq!(paths, [r"C:\Music\Jazz\b.flac", r"C:\Music\a.flac"]);
+    }
+
+    /// Windows does not tell `D:\Musique` from `d:\musique`: a root written
+    /// either way finds the same rows, keyed alike.
+    #[cfg(windows)]
+    #[test]
+    fn known_files_ignore_the_case_of_the_root() {
+        let mut index = Index::open_in_memory().unwrap();
+        insert(
+            &mut index,
+            vec![
+                sample(r"D:\Musique\Été\a.flac"),
+                sample(r"D:\Musique\b.flac"),
+            ],
+        );
+        for root in [r"D:\Musique", r"d:\MUSIQUE", "D:/Musique/"] {
+            let known = index.known_under(Path::new(root)).unwrap();
+            assert_eq!(known.len(), 2, "{root}");
+            assert!(
+                known.contains_key(&paths::compare_key(r"d:\musique\ÉTÉ\A.FLAC")),
+                "{root}"
+            );
+        }
     }
 }

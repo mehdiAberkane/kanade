@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 use super::index::{Candidate, Changes, Index, Known, TrackId, TrackStatus};
+use super::paths;
 use super::track::{FileStamp, ReadError, ReadErrorKind, Track, is_audio_file, read_track};
 use crate::store::{self, StoreError};
 
@@ -49,6 +50,9 @@ pub struct ScanReport {
     pub errors: Vec<ScanError>,
     /// Errors beyond `MAX_ERRORS_KEPT`, counted only.
     pub errors_omitted: usize,
+    /// Files kept online only (OneDrive, Google Drive...): not read, since
+    /// reading would download them. KAN-2 asks before.
+    pub online_only: usize,
 }
 
 impl ScanReport {
@@ -122,21 +126,18 @@ pub fn scan_folder_at(
     root: &Path,
     now_ms: i64,
 ) -> Result<ScanReport, LibraryError> {
-    match fs::metadata(root) {
-        Ok(m) if m.is_dir() => {}
-        Ok(_) => {
-            return Err(LibraryError::RootUnavailable {
-                root: root.display().to_string(),
-                message: "not a folder".to_owned(),
-            });
-        }
-        Err(e) => {
-            return Err(LibraryError::RootUnavailable {
-                root: root.display().to_string(),
-                message: e.to_string(),
-            });
-        }
+    // One spelling for a folder Windows sees as one (case, `/`, short
+    // names, `\\?\`): the walked paths then come in the real case of the
+    // disk, the same at every scan.
+    let unavailable = |message: String| LibraryError::RootUnavailable {
+        root: root.display().to_string(),
+        message,
+    };
+    let root = paths::normalize_root(root).map_err(|e| unavailable(e.to_string()))?;
+    if !root.is_dir() {
+        return Err(unavailable("not a folder".to_owned()));
     }
+    let root = root.as_path();
 
     let mut scan = Scan {
         known: index.known_under(root)?,
@@ -192,16 +193,24 @@ struct Scan {
 impl Scan {
     fn file(&mut self, index: &Index, entry: &walkdir::DirEntry) -> Result<(), LibraryError> {
         let Some(path) = entry.path().to_str().map(str::to_owned) else {
+            // Windows allows names that are not valid Unicode (a lone
+            // surrogate); the index stores text: the file is only reported.
             self.report.error(
                 entry.path().display().to_string(),
-                "path is not valid UTF-8".to_owned(),
+                "name is not valid Unicode: the file cannot be indexed".to_owned(),
             );
             return Ok(());
         };
-        self.seen.insert(path.clone());
-        let known = self.known.get(&path).cloned();
+        let key = paths::compare_key(&path);
+        self.seen.insert(key.clone());
+        let known = self.known.get(&key).cloned();
 
         let stamp = match entry.metadata() {
+            Ok(m) if paths::is_online_only(&m) => {
+                // Reading it would download it from the cloud: not now.
+                self.report.online_only += 1;
+                return Ok(());
+            }
             Ok(m) => FileStamp::of(&m),
             Err(e) => {
                 if let Some(known) = known {
@@ -299,14 +308,14 @@ impl Scan {
         let gone: HashMap<String, Known> = self
             .known
             .iter()
-            .filter(|(path, _)| {
-                !self.seen.contains(*path)
+            .filter(|(key, known)| {
+                !self.seen.contains(*key)
                     && !self
                         .unreadable_dirs
                         .iter()
-                        .any(|dir| Path::new(path).starts_with(dir))
+                        .any(|dir| paths::is_under(&known.path, &dir.to_string_lossy()))
             })
-            .map(|(path, known)| (path.clone(), known.clone()))
+            .map(|(key, known)| (key.clone(), known.clone()))
             .collect();
 
         let mut claimed: HashSet<TrackId> = HashSet::new();
@@ -360,15 +369,16 @@ fn retry(status: &TrackStatus) -> bool {
 /// elsewhere (another library, the old letter of a drive), already marked
 /// missing or no longer on the disk.
 fn is_gone(candidate: &Candidate, root: &Path, gone_under_root: &HashMap<String, Known>) -> bool {
-    if gone_under_root.contains_key(&candidate.path) {
+    if gone_under_root.contains_key(&paths::compare_key(&candidate.path)) {
         return true;
     }
-    if Path::new(&candidate.path).starts_with(root) {
+    if paths::is_under(&candidate.path, &root.to_string_lossy()) {
         // Seen by this scan, or in a folder that could not be listed.
         return false;
     }
     matches!(candidate.status, TrackStatus::Missing { .. })
-        || fs::symlink_metadata(&candidate.path).is_err_and(|e| e.kind() == ErrorKind::NotFound)
+        || fs::symlink_metadata(paths::for_io(Path::new(&candidate.path)))
+            .is_err_and(|e| e.kind() == ErrorKind::NotFound)
 }
 
 #[cfg(test)]
@@ -411,9 +421,20 @@ mod tests {
         scan_folder_at(index, root, NOW).unwrap()
     }
 
+    /// A file's path as the index stores it: under its folder's reference
+    /// form (on GitHub's runners, the temp folder has a short 8.3 name).
+    fn stored(path: &Path) -> String {
+        let folder = paths::normalize_root(path.parent().unwrap()).unwrap();
+        folder
+            .join(path.file_name().unwrap())
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
     fn id_of(index: &Index, path: &Path) -> TrackId {
         index
-            .track_by_path(path.to_str().unwrap())
+            .track_by_path(&stored(path))
             .unwrap()
             .unwrap_or_else(|| panic!("{} not indexed", path.display()))
             .id
@@ -453,7 +474,7 @@ mod tests {
         ));
 
         let mp3 = index
-            .track_by_path(dir.path().join("tone.mp3").to_str().unwrap())
+            .track_by_path(&stored(&dir.path().join("tone.mp3")))
             .unwrap()
             .unwrap();
         assert_eq!(mp3.track.title.as_deref(), Some("Title of tone.mp3"));
@@ -550,7 +571,7 @@ mod tests {
                 fs::copy(entry.path(), &target).unwrap();
             }
         }
-        let old_path = old_root.path().to_path_buf();
+        let old_path = paths::normalize_root(old_root.path()).unwrap();
         drop(old_root);
 
         let report = scan(&mut index, new_root.path());
@@ -872,5 +893,152 @@ mod tests {
         assert_eq!(report.missing, 1);
         let first_mp3 = id_of(&index, &first.path().join("tone.mp3"));
         assert_eq!(status_of(&index, first_mp3), TrackStatus::Present);
+    }
+
+    // --- Windows paths (KAN-25) ---------------------------------------------
+
+    /// The same folder written three ways: one set of rows, nothing read
+    /// again, and a deleted file still noticed.
+    #[cfg(windows)]
+    #[test]
+    fn a_root_written_three_ways_is_one_library() {
+        let dir = library();
+        let plain = dir.path().to_str().unwrap().to_owned();
+        let mut index = Index::open_in_memory().unwrap();
+        scan(&mut index, dir.path());
+        for spelling in [
+            plain.to_uppercase(),
+            format!("{}/", plain.replace('\\', "/").to_lowercase()),
+            format!(r"\\?\{plain}\"),
+        ] {
+            let report = scan(&mut index, Path::new(&spelling));
+            assert_eq!(report.unchanged, listed() + 1, "{spelling}");
+            assert_eq!(
+                (report.added, report.updated, report.missing),
+                (0, 0, 0),
+                "{spelling}"
+            );
+        }
+        assert_eq!(index.count().unwrap(), indexed());
+
+        let id = id_of(&index, &dir.path().join("tone.flac"));
+        fs::remove_file(dir.path().join("tone.flac")).unwrap();
+        let report = scan(&mut index, Path::new(&plain.to_lowercase()));
+        assert_eq!(report.missing, 1);
+        assert!(matches!(status_of(&index, id), TrackStatus::Missing { .. }));
+    }
+
+    /// Folders nested past the old 260-character limit of Windows paths.
+    #[test]
+    fn a_tree_deeper_than_260_characters_is_scanned() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut deep = dir.path().to_path_buf();
+        for level in 0..6 {
+            deep.push(format!(
+                "{level} - a folder name long enough to go past the limit"
+            ));
+        }
+        fs::create_dir_all(&deep).unwrap();
+        let file = deep.join("tone.flac");
+        assert!(file.to_str().unwrap().len() > 300);
+        tagged_copy("tone.flac", &file, "Deep down");
+
+        let mut index = Index::open_in_memory().unwrap();
+        let report = scan(&mut index, dir.path());
+        assert_eq!(report.added, 1, "{report:?}");
+        let track = index.track(id_of(&index, &file)).unwrap().unwrap();
+        assert_eq!(track.track.title.as_deref(), Some("Deep down"));
+    }
+
+    /// Names other tools make and Windows handles badly: outside the basic
+    /// plane, a reserved name, a space before the extension. Opened through
+    /// the \\?\ form, they are read like the others.
+    #[cfg(windows)]
+    #[test]
+    fn unusual_names_are_read_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let verbatim = |name: &str| {
+            PathBuf::from(format!(
+                r"\\?\{}\{name}",
+                paths::normalize_root(dir.path()).unwrap().display()
+            ))
+        };
+        let names = ["🎵 Ünïcödé.flac", "NUL.mp3", "trailing .ogg"];
+        for name in names {
+            let ext = name.rsplit('.').next().unwrap();
+            let source = dir.path().join(format!("source.{ext}"));
+            tagged_copy(&format!("tone.{ext}"), &source, name);
+            fs::rename(&source, verbatim(name)).unwrap();
+        }
+
+        let mut index = Index::open_in_memory().unwrap();
+        let report = scan(&mut index, dir.path());
+        assert_eq!(report.added, names.len(), "{report:?}");
+        let mut titles: Vec<String> = index
+            .tracks()
+            .unwrap()
+            .into_iter()
+            .filter_map(|t| t.track.title)
+            .collect();
+        titles.sort();
+        let mut expected = names.map(str::to_owned).to_vec();
+        expected.sort();
+        assert_eq!(titles, expected);
+    }
+
+    /// A name that is not valid Unicode (a lone surrogate, which NTFS
+    /// accepts): reported, the rest of the folder scanned.
+    #[cfg(windows)]
+    #[test]
+    fn a_name_that_is_not_unicode_is_reported() {
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStringExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut name: Vec<u16> = "bad ".encode_utf16().collect();
+        name.push(0xD800);
+        name.extend(".mp3".encode_utf16());
+        fs::copy(
+            fixture("tone.mp3"),
+            dir.path().join(OsString::from_wide(&name)),
+        )
+        .unwrap();
+        fs::copy(fixture("tone.wav"), dir.path().join("fine.wav")).unwrap();
+
+        let mut index = Index::open_in_memory().unwrap();
+        let report = scan(&mut index, dir.path());
+        assert_eq!(report.added, 1);
+        assert_eq!(report.errors.len(), 1, "{:?}", report.errors);
+        assert!(report.errors[0].message.contains("not valid Unicode"));
+    }
+
+    /// A file kept online only (OneDrive...): not read, so not downloaded,
+    /// and an indexed one that goes online only is not taken for gone.
+    #[cfg(windows)]
+    #[test]
+    fn online_only_files_are_not_read() {
+        let set_offline = |path: &Path| {
+            let status = std::process::Command::new("attrib")
+                .arg("+O")
+                .arg(path)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        };
+        let dir = library();
+        let mut index = Index::open_in_memory().unwrap();
+        scan(&mut index, dir.path());
+        let id = id_of(&index, &dir.path().join("tone.opus"));
+
+        let cloud = dir.path().join("cloud.mp3");
+        fs::copy(fixture("tone.mp3"), &cloud).unwrap();
+        set_offline(&cloud);
+        set_offline(&dir.path().join("tone.opus"));
+
+        let report = scan(&mut index, dir.path());
+        assert_eq!(report.online_only, 2, "{report:?}");
+        assert_eq!((report.added, report.missing), (0, 0));
+        assert_eq!(status_of(&index, id), TrackStatus::Present);
+        assert!(index.track_by_path(&stored(&cloud)).unwrap().is_none());
     }
 }
