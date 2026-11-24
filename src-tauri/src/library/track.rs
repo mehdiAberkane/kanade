@@ -42,8 +42,7 @@ impl Track {
         self.title.clone().unwrap_or_else(|| {
             Path::new(&self.path)
                 .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default()
+                .map_or_else(String::new, |s| s.to_string_lossy().into_owned())
         })
     }
 }
