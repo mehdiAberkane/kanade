@@ -1,37 +1,127 @@
-//! The local SQLite index of the tracks (one row per file), kept on this PC
-//! only, never in a synced folder.
+//! The local SQLite index of the tracks, kept on this PC only, never in a
+//! synced folder.
+//!
+//! Each track has an id that stays the same when its file is renamed or
+//! moved: the screens and the commands name a track by its id, and the data
+//! attached to it later (playlists, ratings, play counts) follows it. A track
+//! whose file is gone or unreadable stays, marked, for a while (see scan.rs).
 
 use std::collections::HashMap;
 use std::path::Path;
 
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::types::Value;
+use rusqlite::{Connection, OptionalExtension, Row, Transaction, params, params_from_iter};
 
 use super::track::{FileStamp, Track};
 
 /// Version of the schema below, stored in `PRAGMA user_version`.
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 2;
 
+/// AUTOINCREMENT: an id is never given again, even after its track left the
+/// index, so data still pointing at it cannot land on another track.
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS tracks (
-    path          TEXT PRIMARY KEY NOT NULL,
-    size          INTEGER NOT NULL,
-    modified_ms   INTEGER NOT NULL,
-    format        TEXT NOT NULL,
-    title         TEXT,
-    artist        TEXT,
-    album_artist  TEXT,
-    album         TEXT,
-    track_number  INTEGER,
-    disc_number   INTEGER,
-    year          INTEGER,
-    genre         TEXT,
-    duration_ms   INTEGER,
-    bitrate_kbps  INTEGER,
-    has_cover     INTEGER NOT NULL
-);";
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    path            TEXT NOT NULL UNIQUE,
+    size            INTEGER NOT NULL,
+    modified_ms     INTEGER NOT NULL,
+    format          TEXT NOT NULL,
+    title           TEXT,
+    artist          TEXT,
+    album_artist    TEXT,
+    album           TEXT,
+    track_number    INTEGER,
+    disc_number     INTEGER,
+    year            INTEGER,
+    genre           TEXT,
+    duration_ms     INTEGER,
+    bitrate_kbps    INTEGER,
+    has_cover       INTEGER NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'present'
+                    CHECK (status IN ('present', 'unreadable', 'missing')),
+    status_since_ms INTEGER,
+    status_reason   TEXT
+);
+CREATE INDEX IF NOT EXISTS tracks_by_size ON tracks (size);";
 
-const COLUMNS: &str = "path, size, modified_ms, format, title, artist, album_artist, album, \
+/// The file's columns, in the order of `track_from_row`.
+const FILE_COLUMNS: &str = "path, size, modified_ms, format, title, artist, album_artist, album, \
      track_number, disc_number, year, genre, duration_ms, bitrate_kbps, has_cover";
+
+/// A track's identity in the index: the same after its file is renamed or
+/// moved, and never given to another track.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TrackId(pub i64);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TrackStatus {
+    Present,
+    /// The file is there but could not be read (locked by another program,
+    /// damaged): the last tags read are kept.
+    Unreadable {
+        since_ms: i64,
+        reason: String,
+    },
+    /// The file is gone: the track is kept for a while, so a move done in
+    /// two steps (cut, scan, paste) finds it again.
+    Missing {
+        since_ms: i64,
+    },
+}
+
+/// A track as the index knows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexedTrack {
+    pub id: TrackId,
+    pub status: TrackStatus,
+    pub track: Track,
+}
+
+/// What a scan needs to know about an indexed file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Known {
+    pub id: TrackId,
+    pub stamp: FileStamp,
+    pub status: TrackStatus,
+}
+
+/// An indexed track with the same content as a file being scanned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Candidate {
+    pub id: TrackId,
+    pub path: String,
+    pub status: TrackStatus,
+}
+
+/// What a scan writes, in one transaction.
+#[derive(Debug, Default)]
+pub struct Changes {
+    /// New tracks.
+    pub insert: Vec<Track>,
+    /// Files read again or moved: new path and tags for an existing track,
+    /// present again.
+    pub update: Vec<(TrackId, Track)>,
+    /// Tracks that became unreadable or missing.
+    pub mark: Vec<(TrackId, TrackStatus)>,
+    pub remove: Vec<TrackId>,
+}
+
+impl Changes {
+    pub fn len(&self) -> usize {
+        self.insert.len() + self.update.len() + self.mark.len() + self.remove.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn clear(&mut self) {
+        self.insert.clear();
+        self.update.clear();
+        self.mark.clear();
+        self.remove.clear();
+    }
+}
 
 pub struct Index {
     conn: Connection,
@@ -54,88 +144,135 @@ impl Index {
         if version > SCHEMA_VERSION {
             return Err(rusqlite::Error::InvalidQuery);
         }
+        if version == 1 {
+            // Version 1 named tracks by their path, and held nothing but
+            // what the files say: the next scan rebuilds it.
+            conn.execute_batch("DROP TABLE IF EXISTS tracks;")?;
+        }
         conn.execute_batch(SCHEMA)?;
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(Self { conn })
     }
 
-    /// Size and modification time of every indexed file under `root`
-    /// (compared component by component: `C:\Music` does not contain
-    /// `C:\Music2`).
-    pub fn stamps_under(&self, root: &Path) -> rusqlite::Result<HashMap<String, FileStamp>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT path, size, modified_ms FROM tracks")?;
+    /// Every indexed file under `root`, by path (compared component by
+    /// component: `C:\Music` does not contain `C:\Music2`).
+    pub fn known_under(&self, root: &Path) -> rusqlite::Result<HashMap<String, Known>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, path, size, modified_ms, status, status_since_ms, status_reason \
+             FROM tracks",
+        )?;
         let rows = stmt.query_map([], |r| {
             Ok((
-                r.get::<_, String>(0)?,
-                FileStamp {
-                    size: r.get::<_, i64>(1)?.try_into().unwrap_or(0),
-                    modified_ms: r.get(2)?,
+                r.get::<_, String>(1)?,
+                Known {
+                    id: TrackId(r.get(0)?),
+                    stamp: FileStamp {
+                        size: r.get::<_, i64>(2)?.try_into().unwrap_or(0),
+                        modified_ms: r.get(3)?,
+                    },
+                    status: status_from_row(r, 4)?,
                 },
             ))
         })?;
-        let mut stamps = HashMap::new();
+        let mut known = HashMap::new();
         for row in rows {
-            let (path, stamp) = row?;
+            let (path, file) = row?;
             if Path::new(&path).starts_with(root) {
-                stamps.insert(path, stamp);
+                known.insert(path, file);
             }
         }
-        Ok(stamps)
+        Ok(known)
     }
 
-    /// Adds or replaces `upserts` and deletes `removals`, all or nothing.
-    pub fn write_batch(&mut self, upserts: &[Track], removals: &[String]) -> rusqlite::Result<()> {
+    /// Indexed tracks with the same size, format, duration and tags as
+    /// `track`, wherever their file is: the candidates for a moved file.
+    pub fn same_content(&self, track: &Track) -> rusqlite::Result<Vec<Candidate>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT id, path, status, status_since_ms, status_reason FROM tracks \
+             WHERE size = ?1 AND format = ?2 AND duration_ms IS ?3 AND title IS ?4 \
+             AND artist IS ?5 AND album_artist IS ?6 AND album IS ?7 \
+             AND track_number IS ?8 AND disc_number IS ?9",
+        )?;
+        stmt.query_map(
+            params![
+                size_column(track.stamp.size),
+                track.format,
+                track.duration_ms.map(size_column),
+                track.title,
+                track.artist,
+                track.album_artist,
+                track.album,
+                track.track_number,
+                track.disc_number,
+            ],
+            |r| {
+                Ok(Candidate {
+                    id: TrackId(r.get(0)?),
+                    path: r.get(1)?,
+                    status: status_from_row(r, 2)?,
+                })
+            },
+        )?
+        .collect()
+    }
+
+    /// Writes `changes`, all or nothing.
+    pub fn apply(&mut self, changes: &Changes) -> rusqlite::Result<()> {
         let tx = self.conn.transaction()?;
+        // Removals first: they free paths that the other changes may take.
         {
-            let mut insert = tx.prepare(&format!(
-                "INSERT OR REPLACE INTO tracks ({COLUMNS}) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)"
-            ))?;
-            for t in upserts {
-                insert.execute(params![
-                    t.path,
-                    i64::try_from(t.stamp.size).unwrap_or(i64::MAX),
-                    t.stamp.modified_ms,
-                    t.format,
-                    t.title,
-                    t.artist,
-                    t.album_artist,
-                    t.album,
-                    t.track_number,
-                    t.disc_number,
-                    t.year,
-                    t.genre,
-                    t.duration_ms.map(|d| i64::try_from(d).unwrap_or(i64::MAX)),
-                    t.bitrate_kbps,
-                    t.has_cover,
-                ])?;
+            let mut delete = tx.prepare("DELETE FROM tracks WHERE id = ?1")?;
+            for id in &changes.remove {
+                delete.execute([id.0])?;
             }
-            let mut delete = tx.prepare("DELETE FROM tracks WHERE path = ?1")?;
-            for path in removals {
-                delete.execute([path])?;
+        }
+        update_tracks(&tx, &changes.update)?;
+        insert_tracks(&tx, &changes.insert)?;
+        {
+            let mut mark = tx.prepare(
+                "UPDATE tracks SET status = ?2, status_since_ms = ?3, status_reason = ?4 \
+                 WHERE id = ?1",
+            )?;
+            for (id, status) in &changes.mark {
+                let (name, since, reason) = status_columns(status);
+                mark.execute(params![id.0, name, since, reason])?;
             }
         }
         tx.commit()
     }
 
-    pub fn track(&self, path: &str) -> rusqlite::Result<Option<Track>> {
+    pub fn track(&self, id: TrackId) -> rusqlite::Result<Option<IndexedTrack>> {
+        self.one_track("id = ?1", id.0)
+    }
+
+    pub fn track_by_path(&self, path: &str) -> rusqlite::Result<Option<IndexedTrack>> {
+        self.one_track("path = ?1", path)
+    }
+
+    fn one_track(
+        &self,
+        condition: &str,
+        value: impl rusqlite::ToSql,
+    ) -> rusqlite::Result<Option<IndexedTrack>> {
         self.conn
             .query_row(
-                &format!("SELECT {COLUMNS} FROM tracks WHERE path = ?1"),
-                [path],
-                track_from_row,
+                &format!(
+                    "SELECT id, status, status_since_ms, status_reason, {FILE_COLUMNS} \
+                     FROM tracks WHERE {condition}"
+                ),
+                [value],
+                indexed_from_row,
             )
             .optional()
     }
 
     /// Every indexed track, by path.
-    pub fn tracks(&self) -> rusqlite::Result<Vec<Track>> {
-        let mut stmt = self
-            .conn
-            .prepare(&format!("SELECT {COLUMNS} FROM tracks ORDER BY path"))?;
-        stmt.query_map([], track_from_row)?.collect()
+    pub fn tracks(&self) -> rusqlite::Result<Vec<IndexedTrack>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT id, status, status_since_ms, status_reason, {FILE_COLUMNS} \
+             FROM tracks ORDER BY path"
+        ))?;
+        stmt.query_map([], indexed_from_row)?.collect()
     }
 
     pub fn count(&self) -> rusqlite::Result<u64> {
@@ -146,27 +283,115 @@ impl Index {
     }
 }
 
-fn track_from_row(r: &Row<'_>) -> rusqlite::Result<Track> {
-    Ok(Track {
-        path: r.get(0)?,
-        stamp: FileStamp {
-            size: r.get::<_, i64>(1)?.try_into().unwrap_or(0),
-            modified_ms: r.get(2)?,
+fn insert_tracks(tx: &Transaction<'_>, tracks: &[Track]) -> rusqlite::Result<()> {
+    let mut insert = tx.prepare(&format!(
+        "INSERT INTO tracks ({FILE_COLUMNS}) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)"
+    ))?;
+    for t in tracks {
+        insert.execute(params_from_iter(file_values(t)))?;
+    }
+    Ok(())
+}
+
+/// New path and tags for existing tracks, which become present again.
+fn update_tracks(tx: &Transaction<'_>, updates: &[(TrackId, Track)]) -> rusqlite::Result<()> {
+    let mut update = tx.prepare(
+        "UPDATE tracks SET path = ?1, size = ?2, modified_ms = ?3, format = ?4, title = ?5, \
+         artist = ?6, album_artist = ?7, album = ?8, track_number = ?9, disc_number = ?10, \
+         year = ?11, genre = ?12, duration_ms = ?13, bitrate_kbps = ?14, has_cover = ?15, \
+         status = 'present', status_since_ms = NULL, status_reason = NULL \
+         WHERE id = ?16",
+    )?;
+    for (id, t) in updates {
+        let mut values = file_values(t);
+        values.push(id.0.into());
+        update.execute(params_from_iter(values))?;
+    }
+    Ok(())
+}
+
+/// The values of `FILE_COLUMNS`, in order.
+fn file_values(t: &Track) -> Vec<Value> {
+    vec![
+        t.path.clone().into(),
+        size_column(t.stamp.size).into(),
+        t.stamp.modified_ms.into(),
+        t.format.clone().into(),
+        t.title.clone().into(),
+        t.artist.clone().into(),
+        t.album_artist.clone().into(),
+        t.album.clone().into(),
+        t.track_number.into(),
+        t.disc_number.into(),
+        t.year.into(),
+        t.genre.clone().into(),
+        t.duration_ms.map(size_column).into(),
+        t.bitrate_kbps.into(),
+        t.has_cover.into(),
+    ]
+}
+
+/// SQLite integers are signed: sizes and durations past `i64::MAX` (never
+/// seen) are stored as `i64::MAX`.
+fn size_column(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
+}
+
+fn status_columns(status: &TrackStatus) -> (&'static str, Option<i64>, Option<&str>) {
+    match status {
+        TrackStatus::Present => ("present", None, None),
+        TrackStatus::Unreadable { since_ms, reason } => {
+            ("unreadable", Some(*since_ms), Some(reason.as_str()))
+        }
+        TrackStatus::Missing { since_ms } => ("missing", Some(*since_ms), None),
+    }
+}
+
+/// The status stored in columns `first` (name), `first + 1` (since) and
+/// `first + 2` (reason).
+fn status_from_row(r: &Row<'_>, first: usize) -> rusqlite::Result<TrackStatus> {
+    let name: String = r.get(first)?;
+    let since: Option<i64> = r.get(first + 1)?;
+    Ok(match name.as_str() {
+        "unreadable" => TrackStatus::Unreadable {
+            since_ms: since.unwrap_or(0),
+            reason: r.get::<_, Option<String>>(first + 2)?.unwrap_or_default(),
         },
-        format: r.get(3)?,
-        title: r.get(4)?,
-        artist: r.get(5)?,
-        album_artist: r.get(6)?,
-        album: r.get(7)?,
-        track_number: r.get(8)?,
-        disc_number: r.get(9)?,
-        year: r.get(10)?,
-        genre: r.get(11)?,
-        duration_ms: r
-            .get::<_, Option<i64>>(12)?
-            .and_then(|d| u64::try_from(d).ok()),
-        bitrate_kbps: r.get(13)?,
-        has_cover: r.get(14)?,
+        "missing" => TrackStatus::Missing {
+            since_ms: since.unwrap_or(0),
+        },
+        _ => TrackStatus::Present,
+    })
+}
+
+/// A row of `id, status, status_since_ms, status_reason, FILE_COLUMNS`.
+fn indexed_from_row(r: &Row<'_>) -> rusqlite::Result<IndexedTrack> {
+    const FILE: usize = 4;
+    Ok(IndexedTrack {
+        id: TrackId(r.get(0)?),
+        status: status_from_row(r, 1)?,
+        track: Track {
+            path: r.get(FILE)?,
+            stamp: FileStamp {
+                size: r.get::<_, i64>(FILE + 1)?.try_into().unwrap_or(0),
+                modified_ms: r.get(FILE + 2)?,
+            },
+            format: r.get(FILE + 3)?,
+            title: r.get(FILE + 4)?,
+            artist: r.get(FILE + 5)?,
+            album_artist: r.get(FILE + 6)?,
+            album: r.get(FILE + 7)?,
+            track_number: r.get(FILE + 8)?,
+            disc_number: r.get(FILE + 9)?,
+            year: r.get(FILE + 10)?,
+            genre: r.get(FILE + 11)?,
+            duration_ms: r
+                .get::<_, Option<i64>>(FILE + 12)?
+                .and_then(|d| u64::try_from(d).ok()),
+            bitrate_kbps: r.get(FILE + 13)?,
+            has_cover: r.get(FILE + 14)?,
+        },
     })
 }
 
@@ -196,15 +421,29 @@ mod tests {
         }
     }
 
+    fn insert(index: &mut Index, tracks: Vec<Track>) {
+        index
+            .apply(&Changes {
+                insert: tracks,
+                ..Changes::default()
+            })
+            .unwrap();
+    }
+
+    fn id_of(index: &Index, path: &str) -> TrackId {
+        index.track_by_path(path).unwrap().unwrap().id
+    }
+
     #[test]
     fn stores_and_reads_back_a_track() {
         let mut index = Index::open_in_memory().unwrap();
         let track = sample(r"C:\Music\Kind of Blue\03.flac");
-        index
-            .write_batch(std::slice::from_ref(&track), &[])
-            .unwrap();
-        assert_eq!(index.track(&track.path).unwrap(), Some(track.clone()));
-        assert_eq!(index.tracks().unwrap(), vec![track]);
+        insert(&mut index, vec![track.clone()]);
+        let stored = index.track_by_path(&track.path).unwrap().unwrap();
+        assert_eq!(stored.track, track);
+        assert_eq!(stored.status, TrackStatus::Present);
+        assert_eq!(index.track(stored.id).unwrap(), Some(stored.clone()));
+        assert_eq!(index.tracks().unwrap(), vec![stored]);
         assert_eq!(index.count().unwrap(), 1);
     }
 
@@ -216,47 +455,128 @@ mod tests {
         track.year = None;
         track.duration_ms = None;
         track.has_cover = false;
-        index
-            .write_batch(std::slice::from_ref(&track), &[])
-            .unwrap();
-        assert_eq!(index.track(&track.path).unwrap(), Some(track));
-    }
-
-    #[test]
-    fn replaces_and_removes_tracks() {
-        let mut index = Index::open_in_memory().unwrap();
-        let mut track = sample(r"C:\Music\a.flac");
-        index
-            .write_batch(std::slice::from_ref(&track), &[])
-            .unwrap();
-        track.title = Some("Renamed".to_owned());
-        index
-            .write_batch(std::slice::from_ref(&track), &[])
-            .unwrap();
-        assert_eq!(index.count().unwrap(), 1);
+        insert(&mut index, vec![track.clone()]);
         assert_eq!(
-            index.track(&track.path).unwrap().unwrap().title,
-            track.title
+            index.track_by_path(&track.path).unwrap().unwrap().track,
+            track
         );
-        index.write_batch(&[], &[track.path.clone()]).unwrap();
-        assert_eq!(index.count().unwrap(), 0);
     }
 
     #[test]
-    fn stamps_under_a_root_ignore_its_neighbours() {
+    fn an_update_keeps_the_id_even_with_a_new_path() {
         let mut index = Index::open_in_memory().unwrap();
+        insert(&mut index, vec![sample(r"C:\Music\a.flac")]);
+        let id = id_of(&index, r"C:\Music\a.flac");
+        let mut moved = sample(r"D:\Sorted\Miles Davis\a.flac");
+        moved.title = Some("Blue in Green (take 2)".to_owned());
         index
-            .write_batch(
-                &[
-                    sample(r"C:\Music\a.flac"),
-                    sample(r"C:\Music\Jazz\b.flac"),
-                    sample(r"C:\Music2\c.flac"),
-                ],
-                &[],
-            )
+            .apply(&Changes {
+                update: vec![(id, moved.clone())],
+                ..Changes::default()
+            })
             .unwrap();
+        assert!(index.track_by_path(r"C:\Music\a.flac").unwrap().is_none());
+        assert_eq!(index.track(id).unwrap().unwrap().track, moved);
+        assert_eq!(index.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn marks_tracks_and_brings_them_back() {
+        let mut index = Index::open_in_memory().unwrap();
+        insert(
+            &mut index,
+            vec![sample(r"C:\Music\a.flac"), sample(r"C:\Music\b.flac")],
+        );
+        let a = id_of(&index, r"C:\Music\a.flac");
+        let b = id_of(&index, r"C:\Music\b.flac");
+        let locked = TrackStatus::Unreadable {
+            since_ms: 1_800_000_000_000,
+            reason: "used by another process".to_owned(),
+        };
+        let gone = TrackStatus::Missing {
+            since_ms: 1_800_000_000_000,
+        };
+        index
+            .apply(&Changes {
+                mark: vec![(a, locked.clone()), (b, gone.clone())],
+                ..Changes::default()
+            })
+            .unwrap();
+        assert_eq!(index.track(a).unwrap().unwrap().status, locked);
+        assert_eq!(index.track(b).unwrap().unwrap().status, gone);
+
+        // Read again: present, with no trace of the old status.
+        index
+            .apply(&Changes {
+                update: vec![(a, sample(r"C:\Music\a.flac"))],
+                ..Changes::default()
+            })
+            .unwrap();
+        assert_eq!(
+            index.track(a).unwrap().unwrap().status,
+            TrackStatus::Present
+        );
+    }
+
+    #[test]
+    fn an_id_is_never_given_again() {
+        let mut index = Index::open_in_memory().unwrap();
+        insert(
+            &mut index,
+            vec![sample(r"C:\Music\a.flac"), sample(r"C:\Music\b.flac")],
+        );
+        let b = id_of(&index, r"C:\Music\b.flac");
+        index
+            .apply(&Changes {
+                remove: vec![b],
+                ..Changes::default()
+            })
+            .unwrap();
+        insert(&mut index, vec![sample(r"C:\Music\c.flac")]);
+        assert!(id_of(&index, r"C:\Music\c.flac") > b);
+    }
+
+    #[test]
+    fn finds_tracks_with_the_same_content() {
+        let mut index = Index::open_in_memory().unwrap();
+        let mut retagged = sample(r"C:\Music\retagged.flac");
+        retagged.title = Some("Another title".to_owned());
+        let mut bigger = sample(r"C:\Music\bigger.flac");
+        bigger.stamp.size += 1;
+        let mut untagged = sample(r"C:\Music\untagged.flac");
+        untagged.title = None;
+        insert(
+            &mut index,
+            vec![
+                sample(r"C:\Music\twin.flac"),
+                retagged,
+                bigger,
+                untagged.clone(),
+            ],
+        );
+
+        let found = index.same_content(&sample(r"E:\New\twin.flac")).unwrap();
+        let paths: Vec<&str> = found.iter().map(|c| c.path.as_str()).collect();
+        assert_eq!(paths, [r"C:\Music\twin.flac"]);
+        // A missing tag only matches a missing tag.
+        let found = index.same_content(&untagged).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].path, r"C:\Music\untagged.flac");
+    }
+
+    #[test]
+    fn known_files_under_a_root_ignore_its_neighbours() {
+        let mut index = Index::open_in_memory().unwrap();
+        insert(
+            &mut index,
+            vec![
+                sample(r"C:\Music\a.flac"),
+                sample(r"C:\Music\Jazz\b.flac"),
+                sample(r"C:\Music2\c.flac"),
+            ],
+        );
         let mut paths: Vec<String> = index
-            .stamps_under(Path::new(r"C:\Music"))
+            .known_under(Path::new(r"C:\Music"))
             .unwrap()
             .into_keys()
             .collect();
@@ -269,12 +589,28 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = dir.path().join("library.db");
         let track = sample(r"C:\Music\a.flac");
-        Index::open(&db)
+        insert(&mut Index::open(&db).unwrap(), vec![track.clone()]);
+        let tracks = Index::open(&db).unwrap().tracks().unwrap();
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].track, track);
+    }
+
+    #[test]
+    fn an_index_of_version_1_is_rebuilt() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("library.db");
+        Connection::open(&db)
             .unwrap()
-            .write_batch(std::slice::from_ref(&track), &[])
+            .execute_batch(
+                "CREATE TABLE tracks (path TEXT PRIMARY KEY NOT NULL, size INTEGER NOT NULL);
+                 INSERT INTO tracks VALUES ('old.flac', 1);
+                 PRAGMA user_version = 1;",
+            )
             .unwrap();
-        let reopened = Index::open(&db).unwrap();
-        assert_eq!(reopened.tracks().unwrap(), vec![track]);
+        let mut index = Index::open(&db).unwrap();
+        assert_eq!(index.count().unwrap(), 0);
+        insert(&mut index, vec![sample(r"C:\Music\a.flac")]);
+        assert_eq!(index.count().unwrap(), 1);
     }
 
     #[test]

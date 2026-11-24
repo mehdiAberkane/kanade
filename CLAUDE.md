@@ -21,7 +21,7 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
 - Installer : `npm install`
 - Tests : `npm test`, puis `cargo test --locked` dans `src-tauri`
 - Couverture, comme la CI : `npm run test:coverage` (seuils dans `vitest.config.ts`),
-  puis dans `src-tauri` : `cargo llvm-cov --locked --fail-under-lines 89` (seuil dans
+  puis dans `src-tauri` : `cargo llvm-cov --locked --fail-under-lines 92` (seuil dans
   `ci.yml`). Les seuils sont posés juste sous le niveau atteint : monte-les quand des
   tests s'ajoutent, ne les baisse jamais. Installer l'outil :
   `rustup component add llvm-tools-preview` puis
@@ -100,6 +100,11 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   Pour un installeur local sans clé :
   `npm run tauri build -- --config src-tauri/tauri.unsigned.conf.json`.
 - Interface en français, code et commits en anglais.
+- Index des morceaux (`src-tauri/src/library`) : chaque morceau a un identifiant
+  (`TrackId`) qui ne change pas quand son fichier est renommé ou déplacé, et qui n'est
+  jamais redonné. Les commandes Rust et l'interface désignent un morceau par cet
+  identifiant, jamais par son chemin. Un fichier manquant ou illisible reste dans l'index,
+  marqué, pendant 30 jours (`KEEP_GONE_MS`) avant d'en sortir.
 - Pas de code `unsafe` dans Kanade : `#![forbid(unsafe_code)]` en tête de `lib.rs` et
   `main.rs`. Il ne se contourne pas avec un `allow`.
 - Icône : la source est `app-icon.svg`. Pour la changer, `npm run tauri icon app-icon.svg`,
