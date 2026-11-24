@@ -6,12 +6,30 @@ Chaque Kanade installé contient la **clé publique** (`plugins.updater.pubkey` 
 
 | Élément | Où |
 |---|---|
-| Clé privée | `~/.tauri/kanade.key` (hors du dépôt) et secret GitHub `TAURI_SIGNING_PRIVATE_KEY` |
-| Mot de passe | `~/.tauri/kanade.key.password.txt` et secret `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` |
+| Clé privée | `~/.tauri/kanade.key` (hors du dépôt) et secret `TAURI_SIGNING_PRIVATE_KEY` de l'environnement GitHub `release` |
+| Mot de passe | `~/.tauri/kanade.key.password.txt` et secret `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` du même environnement |
 | Clé publique | `~/.tauri/kanade.key.pub` et `src-tauri/tauri.conf.json` |
 
 Garde une copie de `~/.tauri/` dans un gestionnaire de mots de passe. Sans elle, aucune
 mise à jour automatique n'est plus possible.
+
+## Où GitHub garde la clé
+
+Dans les secrets de l'**environnement `release`** (Settings → Environments → release),
+jamais dans les secrets du dépôt : ceux-là, tout flux de travail du dépôt peut les lire.
+Seul un job qui déclare `environment: release` et tourne sur un tag `v*` (sa règle de
+déploiement) reçoit ceux de l'environnement : le job `build` de `release.yml`.
+
+Pour y mettre (ou remplacer) la clé et son mot de passe, depuis PowerShell, sans que
+leur contenu s'affiche ni passe par le presse-papiers :
+
+```powershell
+cmd /c "gh secret set TAURI_SIGNING_PRIVATE_KEY --env release -R mehdiAberkane/kanade < %USERPROFILE%\.tauri\kanade.key"
+cmd /c "gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --env release -R mehdiAberkane/kanade < %USERPROFILE%\.tauri\kanade.key.password.txt"
+gh secret list --env release -R mehdiAberkane/kanade
+```
+
+`gh secret list -R mehdiAberkane/kanade` (sans `--env`) ne doit montrer aucun des deux.
 
 ## Principe du remplacement
 
@@ -32,8 +50,8 @@ les installations l'acceptent, puis font confiance à la nouvelle clé.
    `npm run release`. Elle est signée avec l'ancienne clé.
 4. Installer cette version sur **chaque** PC (Réglages › Mises à jour), puis vérifier le
    numéro de version affiché dans les Réglages.
-5. Remplacer les deux secrets GitHub par la nouvelle clé et son mot de passe
-   (Settings → Secrets and variables → Actions → crayon → Update secret).
+5. Remplacer les deux secrets de l'environnement `release` par la nouvelle clé et son
+   mot de passe (commandes de « Où GitHub garde la clé », avec `kanade-2.key`).
 6. Publier une version de test. L'étape « Check update signing secrets » doit passer,
    et la mise à jour doit s'installer.
 7. Remplacer `~/.tauri/kanade.key*` par les nouveaux fichiers et mettre à jour la copie
@@ -64,6 +82,8 @@ sur chaque poste. Les mises à jour automatiques reprennent ensuite.
 
 ## Protections GitHub en place
 
+- **Environnement `release`** : la clé et son mot de passe sont ses secrets, que seul
+  un job lancé sur un tag `v*` peut lire.
 - **Règles d'étiquettes** (Settings → Rules → Rulesets, « Release tags ») sur
   `refs/tags/v*` : seul l'administrateur du dépôt peut créer, déplacer ou supprimer un
   tag de version.

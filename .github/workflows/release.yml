@@ -1,10 +1,14 @@
 # Builds Kanade for Windows when a version tag (v1.2.3) is pushed, then
 # publishes a GitHub Release with the signed installer and the latest.json that
 # the in-app updater reads (src-tauri/tauri.conf.json, plugins.updater).
-# `npm run release` pushes the tag.
+# `npm run release` pushes the tag. The notes list the titles of the pull
+# requests merged since the previous tag; the Release page adds the
+# installer's SHA-256, to check a download by hand (README).
 #
 # This workflow holds the update signing key: whoever runs code here can sign
 # an update every installed Kanade accepts. Hence:
+# - the key is a secret of the "release" environment, which only a job running
+#   on a v* tag can read, not a repository secret that any workflow could read;
 # - actions are pinned to a commit SHA (a tag can be moved), version in the
 #   comment; Dependabot (.github/dependabot.yml) proposes the updates;
 # - npm install scripts don't run;
@@ -38,12 +42,36 @@ jobs:
   build:
     needs: checks
     runs-on: windows-latest
+    # Holds the update signing key. Its deployment rule only lets jobs on a v*
+    # tag in (Settings › Environments › release).
+    environment: release
     permissions:
       contents: write # create the release and upload the installer
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The history and the tags: the notes list what changed since the
+          # previous version.
+          fetch-depth: 0
+
+      # The subjects of the commits since the previous tag: on main, each is
+      # the title of a merged pull request (squash), with its number. The
+      # version bumps of `npm run release` are left out. These notes go to the
+      # Release and to latest.json, where Kanade reads them before installing.
+      - name: Release notes
+        id: notes
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          previous=$(git describe --tags --abbrev=0 --match 'v*' "$TAG^" 2>/dev/null || true)
+          git log --no-merges --format='- %s' "${previous:+$previous..}$TAG" \
+            | grep -v '^- Release v' > "$RUNNER_TEMP/notes.md" || true
+          [ -s "$RUNNER_TEMP/notes.md" ] || echo "- Corrections mineures." > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+          end="NOTES_${GITHUB_RUN_ID}_${RANDOM}${RANDOM}"
+          { echo "body<<$end"; cat "$RUNNER_TEMP/notes.md"; echo "$end"; } >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -91,8 +119,46 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Kanade ${{ github.ref_name }}
-          releaseBody: Mise à jour installable depuis Réglages › Mises à jour, dans Kanade.
+          # Also the notes of latest.json, shown by Kanade before it installs.
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
           # Already built: no beforeBuildCommand (src-tauri/tauri.sign.conf.json).
           args: --bundles msi --config src-tauri/tauri.sign.conf.json
+
+      # The installer is not signed for Windows (docs in the README): its
+      # SHA-256 on the Release page lets a download be checked by hand. It must
+      # match the digest GitHub computed for the uploaded asset. Without the key;
+      # latest.json keeps the plain notes.
+      - name: Publish the installer's SHA-256
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          shopt -s nullglob
+          msis=(src-tauri/target/release/bundle/msi/*.msi)
+          [ "${#msis[@]}" -eq 1 ] || { echo "::error::Un seul MSI attendu, trouvé : ${msis[*]}"; exit 1; }
+          name=$(basename "${msis[0]}")
+          hash=$(sha256sum "${msis[0]}" | cut -d' ' -f1)
+          for attempt in 1 2 3 4 5; do
+            published=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" \
+              --jq ".assets[] | select(.name == \"$name\") | .digest // empty")
+            [ -n "$published" ] && break
+            sleep 5
+          done
+          [ "$published" = "sha256:$hash" ] || { echo "::error::Empreinte publiée (${published:-aucune}) différente du MSI construit ($hash)"; exit 1; }
+          {
+            cat "$RUNNER_TEMP/notes.md"
+            echo
+            echo "Mise à jour installable depuis Réglages › Mises à jour, dans Kanade."
+            echo
+            echo "SHA-256 de \`$name\` :"
+            echo
+            echo '```'
+            echo "$hash"
+            echo '```'
+            echo
+            echo "Pour vérifier un téléchargement : « Vérifier l'installeur » dans le README."
+          } > "$RUNNER_TEMP/release.md"
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/release.md"
