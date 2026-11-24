@@ -2,6 +2,7 @@
 //! on a thread of their own, and the tags of their audio files kept in a
 //! local SQLite index, so the app does not re-read every file at each launch.
 
+pub mod covers;
 pub mod index;
 pub mod libraries;
 pub mod listing;
@@ -11,9 +12,10 @@ pub mod scanner;
 pub mod service;
 pub mod track;
 
+pub use covers::{CoverSize, CoverSource};
 pub use index::{Index, IndexedTrack, TrackId, TrackStatus};
 pub use libraries::{LastScan, Library, LibraryId, ScanOutcome, Settings, TooBroad};
-pub use listing::{RevealTarget, TrackRow, TrackView};
+pub use listing::{AlbumView, RevealTarget, TrackRow, TrackView};
 pub use scan::{
     KEEP_GONE_MS, LibraryError, ScanControl, ScanError, ScanProgress, ScanReport, scan_folder,
 };

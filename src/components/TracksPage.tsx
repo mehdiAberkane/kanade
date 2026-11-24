@@ -4,15 +4,23 @@ import { cardState, formatNumber, type Settings } from "../lib/libraries";
 import { sortTracks, type Context } from "../lib/tracks";
 import { useAddLibrary, useLibraries } from "../lib/useLibraries";
 import { useTracks, useTrackView } from "../lib/useTracks";
+import { AlbumsView } from "./AlbumsView";
 import { TrackTable } from "./TrackTable";
 
 const BADGES = { scanning: "scan", queued: "en attente", offline: "hors ligne", idle: null };
 
+const ALL = "Toute la musique";
+type Tab = "tracks" | "albums";
+const TABS: Tab[] = ["tracks", "albums"];
+const TAB_LABELS: Record<Tab, string> = { tracks: "Morceaux", albums: "Albums" };
+
 /**
- * The tracks: « Tous les morceaux » and each library on the left, the list
- * on the right. The libraries are managed on their own page.
+ * The music: « Toute la musique » and each library on the left; on the
+ * right, the tracks or the albums of the one chosen. The libraries are
+ * managed on their own page.
  */
 export function TracksPage({ onManage }: { onManage: () => void }) {
+  const [tab, setTab] = useState<Tab>("tracks");
   const { libraries } = useLibraries();
   const { tracks, error } = useTracks();
   const { view, update } = useTrackView();
@@ -60,6 +68,11 @@ export function TracksPage({ onManage }: { onManage: () => void }) {
     () => (libraryId === null ? sorted : sorted.filter((t) => t.libraryId === libraryId)),
     [sorted, libraryId],
   );
+  // The albums group them in their own order: the list's sort does not count.
+  const inLibrary = useMemo(() => {
+    const all = tracks ?? [];
+    return libraryId === null ? all : all.filter((t) => t.libraryId === libraryId);
+  }, [tracks, libraryId]);
   const counts = useMemo(() => {
     const byLibrary = new Map<number, number>();
     for (const t of tracks ?? []) byLibrary.set(t.libraryId, (byLibrary.get(t.libraryId) ?? 0) + 1);
@@ -69,7 +82,7 @@ export function TracksPage({ onManage }: { onManage: () => void }) {
     (libraries ?? []).filter((l) => cardState(l) === "offline").map((l) => l.id),
   );
   const state = library ? cardState(library) : null;
-  const label = library?.name ?? "Tous les morceaux";
+  const label = library?.name ?? ALL;
 
   let main;
   if (libraries?.length === 0) {
@@ -93,6 +106,16 @@ export function TracksPage({ onManage }: { onManage: () => void }) {
           ? "Scan en cours : les morceaux arrivent."
           : "Aucun morceau pour l'instant."}
       </p>
+    );
+  } else if (tab === "albums") {
+    main = (
+      <AlbumsView
+        key={libraryId ?? "all"}
+        tracks={inLibrary}
+        ignoreArticles={ignoreArticles}
+        offline={offline}
+        label={`Albums : ${label}`}
+      />
     );
   } else {
     main = (
@@ -121,7 +144,7 @@ export function TracksPage({ onManage }: { onManage: () => void }) {
                 setChosen(null);
               }}
             >
-              <span className="side-name">Tous les morceaux</span>
+              <span className="side-name">{ALL}</span>
               <span className="count">{formatNumber(tracks?.length ?? 0)}</span>
             </button>
           </li>
@@ -149,7 +172,34 @@ export function TracksPage({ onManage }: { onManage: () => void }) {
         </button>
       </nav>
       <section className="tracks-main" aria-label={label}>
-        <h1 className="sr-only">Morceaux</h1>
+        <h1 className="sr-only">Musique</h1>
+        <div className="view-tabs" role="tablist" aria-label="Affichage">
+          {TABS.map((t) => (
+            <button
+              key={t}
+              id={`tab-${t}`}
+              type="button"
+              role="tab"
+              aria-selected={tab === t}
+              aria-controls="view-panel"
+              tabIndex={tab === t ? 0 : -1}
+              onClick={() => {
+                setTab(t);
+              }}
+              onKeyDown={(event) => {
+                // Left and right go from one tab to the other.
+                const step = { ArrowLeft: -1, ArrowRight: 1 }[event.key];
+                if (step === undefined) return;
+                event.preventDefault();
+                const next = TABS[(TABS.indexOf(t) + step + TABS.length) % TABS.length];
+                setTab(next);
+                document.getElementById(`tab-${next}`)?.focus();
+              }}
+            >
+              {TAB_LABELS[t]}
+            </button>
+          ))}
+        </div>
         {error && (
           <p className="status status-error" role="alert">
             Impossible de lire les morceaux : {error}
@@ -165,7 +215,9 @@ export function TracksPage({ onManage }: { onManage: () => void }) {
             « {label} » est hors ligne : ses morceaux restent, grisés, jusqu'à son retour.
           </p>
         )}
-        {main}
+        <div className="view-panel" id="view-panel" role="tabpanel" aria-labelledby={`tab-${tab}`}>
+          {main}
+        </div>
       </section>
     </div>
   );

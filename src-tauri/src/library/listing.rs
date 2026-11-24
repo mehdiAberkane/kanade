@@ -8,12 +8,14 @@
 //! round trip, with sort keys (accents, articles, numbers) kept in the
 //! database. The list only draws the rows on screen.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
-use super::index::{Index, TrackId};
+use super::covers::CoverSource;
+use super::index::{Index, TrackId, TrackStatus};
 use super::paths;
 use super::scan::LibraryError;
 
@@ -59,6 +61,8 @@ pub struct TrackRow(
     pub Option<i64>,
     /// Date the file was last modified.
     pub i64,
+    /// Its tags hold a picture: the album's cover is taken from such a track.
+    pub bool,
 );
 
 /// Where « Afficher dans l'Explorateur » goes: the file, selected, or its
@@ -130,6 +134,33 @@ impl TrackView {
 
 const TRACK_VIEW: &str = "track_view";
 
+/// The albums' grid as the user left it: its sort and the size of its tiles.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AlbumView {
+    pub sort: SortPref,
+    /// Width of a tile, in pixels.
+    pub size: u32,
+}
+
+/// The columns the albums sort by (src/lib/albums.ts).
+const ALBUM_SORTS: &[&str] = &["title", "artist", "year", "added"];
+/// Widths a tile may take, in pixels.
+pub const ALBUM_SIZES: std::ops::RangeInclusive<u32> = 120..=320;
+
+impl AlbumView {
+    /// What the interface sends, made safe to keep: a sort it knows, a size
+    /// within bounds.
+    pub fn sanitized(mut self) -> Self {
+        if !ALBUM_SORTS.contains(&self.sort.column.as_str()) {
+            "artist".clone_into(&mut self.sort.column);
+        }
+        self.size = self.size.clamp(*ALBUM_SIZES.start(), *ALBUM_SIZES.end());
+        self
+    }
+}
+
+const ALBUM_VIEW: &str = "album_view";
+
 impl Index {
     /// Every track of every library, for the list. A track under no
     /// library (its library removed while a scan wrote it) is left out.
@@ -146,7 +177,7 @@ impl Index {
         let mut stmt = self.conn.prepare(
             "SELECT id, status, status_since_ms, path, title, artist, album_artist, album, \
              track_number, disc_number, year, genre, format, duration_ms, bitrate_kbps, size, \
-             added_ms, modified_ms FROM tracks",
+             added_ms, modified_ms, has_cover FROM tracks",
         )?;
         let mut rows = stmt.query([])?;
         let mut list = Vec::new();
@@ -190,9 +221,30 @@ impl Index {
                 r.get(15)?,
                 r.get(16)?,
                 r.get(17)?,
+                r.get(18)?,
             ));
         }
         Ok(list)
+    }
+
+    /// What the cover of track `id` is made from (`covers::cover`).
+    pub fn cover_source(&self, id: TrackId) -> Result<CoverSource, LibraryError> {
+        let indexed = self.track(id)?.ok_or(LibraryError::TrackNotFound)?;
+        Ok(CoverSource {
+            id: id.0,
+            modified_ms: indexed.track.stamp.modified_ms,
+            has_cover: indexed.track.has_cover,
+            present: indexed.status == TrackStatus::Present,
+            path: indexed.track.path,
+        })
+    }
+
+    /// The id and file date of every indexed track: the covers in the cache
+    /// that match none are stale (`covers::purge`).
+    pub fn track_stamps(&self) -> rusqlite::Result<HashSet<(i64, i64)>> {
+        let mut stmt = self.conn.prepare("SELECT id, modified_ms FROM tracks")?;
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect()
     }
 
     /// Where to show the track `id` in the Explorer.
@@ -231,14 +283,41 @@ impl Index {
 
     pub fn save_track_view(&mut self, view: TrackView) -> rusqlite::Result<TrackView> {
         let view = view.sanitized();
-        let json = serde_json::to_string(&view)
+        self.save_json(TRACK_VIEW, &view)?;
+        Ok(view)
+    }
+
+    /// The albums' grid as last left, if any.
+    pub fn album_view(&self) -> rusqlite::Result<Option<AlbumView>> {
+        let json: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                [ALBUM_VIEW],
+                |r| r.get(0),
+            )
+            .optional()?;
+        // One that no longer reads gives way to the default.
+        Ok(json
+            .and_then(|json| serde_json::from_str::<AlbumView>(&json).ok())
+            .map(AlbumView::sanitized))
+    }
+
+    pub fn save_album_view(&mut self, view: AlbumView) -> rusqlite::Result<AlbumView> {
+        let view = view.sanitized();
+        self.save_json(ALBUM_VIEW, &view)?;
+        Ok(view)
+    }
+
+    fn save_json(&self, key: &str, value: &impl Serialize) -> rusqlite::Result<()> {
+        let json = serde_json::to_string(value)
             .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         self.conn.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2) \
              ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-            params![TRACK_VIEW, json],
+            params![key, json],
         )?;
-        Ok(view)
+        Ok(())
     }
 }
 
@@ -300,6 +379,9 @@ mod tests {
         assert_eq!(mp3.13, "MP3");
         assert!(mp3.14.is_some_and(|ms| ms > 0));
         assert_eq!(mp3.17, Some(NOW));
+        // tagged_copy writes a cover; the untagged file has none.
+        assert!(mp3.19);
+        assert!(rows.iter().any(|r| r.5 == "Untagged song" && !r.19));
         // No title tag: the file name.
         assert!(rows.iter().any(|r| r.5 == "Untagged song"));
 
@@ -307,7 +389,8 @@ mod tests {
         let json = serde_json::to_value(mp3).unwrap();
         assert_eq!(json[0], mp3.0);
         assert_eq!(json[5], "Title of tone.mp3");
-        assert_eq!(json.as_array().unwrap().len(), 19);
+        assert_eq!(json.as_array().unwrap().len(), 20);
+        assert_eq!(json[19], true);
     }
 
     #[test]
@@ -329,6 +412,55 @@ mod tests {
         let broken = rows.iter().find(|r| r.4.ends_with("broken.mp3")).unwrap();
         assert_eq!((broken.2, broken.3), (1, Some(NOW)));
         assert_eq!(broken.5, "broken");
+    }
+
+    #[test]
+    fn a_cover_is_looked_up_by_track_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("Musique");
+        fs::create_dir(&root).unwrap();
+        tagged_copy("tone.mp3", &root.join("a.mp3"), "A");
+        fs::copy(fixture("tone.flac"), root.join("b.flac")).unwrap();
+        let mut index = Index::open_in_memory().unwrap();
+        scan_folder_at(&mut index, &root, NOW).unwrap();
+        let tracks = index.tracks().unwrap();
+        let tagged = tracks
+            .iter()
+            .find(|t| t.track.path.ends_with("a.mp3"))
+            .unwrap();
+        let bare = tracks
+            .iter()
+            .find(|t| t.track.path.ends_with("b.flac"))
+            .unwrap();
+
+        let source = index.cover_source(tagged.id).unwrap();
+        assert_eq!(
+            source,
+            CoverSource {
+                id: tagged.id.0,
+                path: tagged.track.path.clone(),
+                modified_ms: tagged.track.stamp.modified_ms,
+                has_cover: true,
+                present: true,
+            }
+        );
+        assert!(!index.cover_source(bare.id).unwrap().has_cover);
+        assert_eq!(
+            index.cover_source(TrackId(9999)).unwrap_err(),
+            LibraryError::TrackNotFound
+        );
+
+        // Gone: no longer present, still known.
+        fs::remove_file(&tagged.track.path).unwrap();
+        scan_folder_at(&mut index, &root, NOW + 1).unwrap();
+        assert!(!index.cover_source(tagged.id).unwrap().present);
+        assert_eq!(
+            index.track_stamps().unwrap(),
+            tracks
+                .iter()
+                .map(|t| (t.id.0, t.track.stamp.modified_ms))
+                .collect()
+        );
     }
 
     #[test]
@@ -467,5 +599,43 @@ mod tests {
         let json = serde_json::to_value(&saved).unwrap();
         assert_eq!(json["sort"]["column"], "album");
         assert_eq!(json["columns"][1]["id"], "albumArtist");
+    }
+
+    #[test]
+    fn the_albums_grid_is_kept_as_the_interface_left_it() {
+        let mut index = Index::open_in_memory().unwrap();
+        assert_eq!(index.album_view().unwrap(), None);
+        let view = AlbumView {
+            sort: SortPref {
+                column: "year".to_owned(),
+                descending: true,
+            },
+            size: 200,
+        };
+        assert_eq!(index.save_album_view(view.clone()).unwrap(), view);
+        assert_eq!(index.album_view().unwrap(), Some(view));
+
+        // An unknown sort and a size out of bounds are put right.
+        let odd = index
+            .save_album_view(AlbumView {
+                sort: SortPref {
+                    column: "path".to_owned(),
+                    descending: false,
+                },
+                size: 9_000,
+            })
+            .unwrap();
+        assert_eq!((odd.sort.column.as_str(), odd.size), ("artist", 320));
+        let tiny = AlbumView { size: 1, ..odd }.sanitized();
+        assert_eq!(tiny.size, 120);
+
+        index
+            .conn
+            .execute(
+                "UPDATE settings SET value = '{}' WHERE key = 'album_view'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(index.album_view().unwrap(), None);
     }
 }

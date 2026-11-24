@@ -95,6 +95,8 @@ export function mockTracks(
     const format = libraryId === 2 ? (pick(2) ? "MP4" : "MP3") : pick(3) ? "FLAC" : "MP3";
     const extension = format === "MP4" ? "m4a" : format.toLowerCase();
     const bitrate = format === "FLAC" ? 800 + pick(300) : 192 + pick(129);
+    // Most albums have a cover in their tags; some only a cover.jpg, some none.
+    const covered = pick(6) !== 0;
     for (let number = 1; number <= length; number++) {
       const id = libraryId * 1_000_000 + rows.length + 1;
       const title = numbered
@@ -125,6 +127,7 @@ export function mockTracks(
         Math.round((durationMs / 1000) * bitrate * 125),
         pick(10) === 0 ? null : now - pick(365) * 86_400_000,
         now - (30 + pick(3000)) * 86_400_000,
+        covered && !untagged && status === 0,
       ]);
     }
   }

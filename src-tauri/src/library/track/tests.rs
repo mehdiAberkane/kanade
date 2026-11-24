@@ -4,7 +4,7 @@ use lofty::picture::{MimeType, Picture, PictureType};
 use std::path::PathBuf;
 
 /// A 1×1 PNG, used as cover art in the tests.
-const PNG_1X1: &[u8] = &[
+pub(crate) const PNG_1X1: &[u8] = &[
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
     0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
     0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
@@ -40,7 +40,7 @@ pub(crate) fn tagged_copy(fixture_name: &str, dest: &Path, title: &str) {
 }
 
 /// The same, with `cover` as the front cover.
-fn tagged_copy_with(fixture_name: &str, dest: &Path, title: &str, cover: Vec<u8>) {
+pub(crate) fn tagged_copy_with(fixture_name: &str, dest: &Path, title: &str, cover: Vec<u8>) {
     fs::copy(fixture(fixture_name), dest).unwrap();
     let mut file = lofty::read_from_path(dest).unwrap();
     let tag_type = file.primary_tag_type();

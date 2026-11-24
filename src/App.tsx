@@ -36,7 +36,7 @@ function App() {
         <span className="brand">Kanade</span>
         <nav className="nav">
           <NavButton current={page} page="tracks" onSelect={setPage}>
-            Morceaux
+            Musique
           </NavButton>
           <NavButton current={page} page="libraries" onSelect={setPage}>
             Bibliothèques

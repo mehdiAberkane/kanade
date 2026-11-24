@@ -81,8 +81,8 @@ describe("App", () => {
   it("opens on the tracks", async () => {
     backend();
     const { screen } = await renderApp();
-    expect(screen.getByRole("heading", { name: "Morceaux" })).toBeTruthy();
-    expect(await screen.findByRole("grid", { name: "Tous les morceaux" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Musique" })).toBeTruthy();
+    expect(await screen.findByRole("grid", { name: "Toute la musique" })).toBeTruthy();
   });
 
   it("shows a placeholder for the version in the settings when the Rust side fails", async () => {
@@ -104,8 +104,8 @@ describe("App", () => {
     expect(settings.getAttribute("aria-current")).toBe("page");
     await user.click(screen.getByRole("button", { name: "Bibliothèques" }));
     expect(screen.getByRole("heading", { name: "Bibliothèques" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Morceaux" }));
-    expect(screen.getByRole("heading", { name: "Morceaux" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Musique" }));
+    expect(screen.getByRole("heading", { name: "Musique" })).toBeTruthy();
   });
 });
 
@@ -231,11 +231,14 @@ describe("Settings › Mises à jour", () => {
     await user.click(await screen.findByRole("button", { name: /^Installer la version/ }));
     await user.click(screen.getByRole("button", { name: "Installer et redémarrer" }));
     expect(await screen.findAllByText("Sauvegarde des données…")).not.toHaveLength(0);
-    const focused = document.activeElement;
+    // The button clicked is now disabled: the browser may move the focus
+    // from it to the page at any time. Either way, Tab goes nowhere else.
+    const confirm = screen.getByRole("button", { name: "Installer et redémarrer" });
     await user.keyboard("{Escape}");
     await user.tab();
+    await user.tab({ shift: true });
     expect(screen.getByRole("dialog")).toBeTruthy();
-    expect(document.activeElement).toBe(focused);
+    expect([confirm, document.body]).toContain(document.activeElement);
   });
 
   it("shows a placeholder for the installed version in the update window too", async () => {

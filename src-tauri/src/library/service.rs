@@ -10,12 +10,14 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::time::SystemTime;
 
 use serde::Serialize;
 
+use super::covers::{self, CoverSize};
 use super::index::{Index, TrackId};
 use super::libraries::{Library, LibraryId, Settings, TooBroad};
-use super::listing::{RevealTarget, TrackRow, TrackView};
+use super::listing::{AlbumView, RevealTarget, TrackRow, TrackView};
 use super::scan::{LibraryError, ScanError};
 use super::scanner::{ScanEvents, ScanState, Scanner};
 use crate::store;
@@ -267,12 +269,39 @@ impl LibraryService {
         self.index().reveal_target(id)
     }
 
+    /// The cover of track `id` as a JPEG, empty when it has none, made from
+    /// its tags or its folder and kept in `cache`. The index is free again
+    /// before the image is read.
+    pub fn cover(
+        &self,
+        id: TrackId,
+        size: CoverSize,
+        cache: &Path,
+    ) -> Result<Vec<u8>, LibraryError> {
+        let source = self.index().cover_source(id)?;
+        Ok(covers::cover(&source, size, cache))
+    }
+
+    /// Removes from `cache` the covers no track uses any more; returns how many.
+    pub fn purge_covers(&self, cache: &Path) -> Result<usize, LibraryError> {
+        let live = self.index().track_stamps()?;
+        Ok(covers::purge(cache, &live, SystemTime::now()))
+    }
+
     pub fn track_view(&self) -> Result<Option<TrackView>, LibraryError> {
         Ok(self.index().track_view()?)
     }
 
     pub fn save_track_view(&self, view: TrackView) -> Result<TrackView, LibraryError> {
         Ok(self.index().save_track_view(view)?)
+    }
+
+    pub fn album_view(&self) -> Result<Option<AlbumView>, LibraryError> {
+        Ok(self.index().album_view()?)
+    }
+
+    pub fn save_album_view(&self, view: AlbumView) -> Result<AlbumView, LibraryError> {
+        Ok(self.index().save_album_view(view)?)
     }
 
     pub fn settings(&self) -> Result<Settings, LibraryError> {
@@ -361,6 +390,29 @@ mod tests {
         assert_eq!(json["name"], "Musique");
         assert_eq!(json["tracks"], FIXTURES.len());
         assert_eq!(json["scan"]["state"], "idle");
+    }
+
+    #[test]
+    fn a_cover_is_made_once_and_purged_when_its_track_changes() {
+        let s = setup();
+        s.service.add(&music(&s, "Musique")).unwrap();
+        s.service.wait_idle();
+        let cache = s.dir.path().join("covers");
+        let id = TrackId(s.service.tracks().unwrap()[0].0);
+
+        let jpeg = s.service.cover(id, CoverSize::Small, &cache).unwrap();
+        assert_eq!(&jpeg[..2], [0xFF, 0xD8]);
+        assert_eq!(fs::read_dir(&cache).unwrap().count(), 1);
+        assert_eq!(
+            s.service.cover(TrackId(9999), CoverSize::Small, &cache),
+            Err(LibraryError::TrackNotFound)
+        );
+
+        // In use: kept. A cover of a track version no longer indexed: removed.
+        assert_eq!(s.service.purge_covers(&cache).unwrap(), 0);
+        fs::write(cache.join(format!("t{}-1-small.jpg", id.0)), b"old").unwrap();
+        assert_eq!(s.service.purge_covers(&cache).unwrap(), 1);
+        assert_eq!(fs::read_dir(&cache).unwrap().count(), 1);
     }
 
     #[test]

@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { completeAlbumView, defaultAlbumView, type AlbumView } from "./albums";
 import { errorText, LIBRARY_EVENTS } from "./libraries";
 import {
   completeView,
@@ -64,39 +65,62 @@ export function useTracks() {
   return { tracks, error };
 }
 
-/** The columns and sort of the list, as the user left them. */
-export function useTrackView() {
-  const [view, setView] = useState<TrackView>(defaultView);
+/**
+ * A view the user arranges (columns, sort, size), read from the Rust side
+ * once and saved there after each change, once the user stops.
+ */
+function useKeptView<T>(
+  get: string,
+  set: string,
+  initial: () => T,
+  complete: (kept: T | null) => T,
+) {
+  const [view, setView] = useState<T>(initial);
   /** Only a change of the user's is saved, not the one read at first. */
   const changed = useRef(false);
 
   useEffect(() => {
-    invoke<TrackView | null>("track_view_get").then(
+    invoke<T | null>(get).then(
       (kept) => {
-        setView(completeView(kept));
+        setView(complete(kept));
       },
       () => {
-        // Not read: the default columns, which is all the user loses.
+        // Not read: the default, which is all the user loses.
       },
     );
-  }, []);
+  }, [get, complete]);
 
   useEffect(() => {
     if (!changed.current) return;
     const timer = window.setTimeout(() => {
-      invoke("track_view_set", { view }).catch(() => {
-        // Not saved: the columns are only back to the default next time.
+      invoke(set, { view }).catch(() => {
+        // Not saved: only back to the default next time.
       });
     }, SAVE_VIEW_AFTER_MS);
     return () => {
       window.clearTimeout(timer);
     };
-  }, [view]);
+  }, [set, view]);
 
-  const update = useCallback((next: TrackView) => {
+  const update = useCallback((next: T) => {
     changed.current = true;
     setView(next);
   }, []);
 
   return { view, update };
+}
+
+/** The columns and sort of the list, as the user left them. */
+export function useTrackView() {
+  return useKeptView<TrackView>("track_view_get", "track_view_set", defaultView, completeView);
+}
+
+/** The albums' sort and tile size, as the user left them. */
+export function useAlbumView() {
+  return useKeptView<AlbumView>(
+    "album_view_get",
+    "album_view_set",
+    defaultAlbumView,
+    completeAlbumView,
+  );
 }

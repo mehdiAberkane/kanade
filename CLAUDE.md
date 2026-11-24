@@ -147,6 +147,24 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   Le tri passe par `Intl.Collator` (accents, casse, nombres) sur des rangs calculés une
   fois par valeur distincte ; ajouter un champ = l'ajouter à `TrackRow` des deux côtés,
   dans le même ordre.
+- Albums (`src/lib/albums.ts`, onglet « Albums » de la page Musique) : regroupés dans
+  l'interface, à partir des mêmes lignes que la liste. Règles :
+  - un album = titre + artiste de l'album, sans casse ni accents ;
+  - une année différente donne un autre album ;
+  - des dossiers fusionnent si leurs numéros disque/piste ne se recouvrent pas (CD1/CD2),
+    sinon deux albums nommés par leur dossier ;
+  - un dossier « CD2 » donne le disque quand le tag manque ;
+  - sans tag d'album : un « Sans album » par artiste.
+- Pochettes (`library/covers.rs`, `src/lib/covers.ts`) :
+  - `track_cover` reçoit un identifiant de morceau et renvoie un JPEG de 400 ou 900 px,
+    jamais l'image d'origine ni un chemin ;
+  - l'image vient des tags (couverture avant d'abord), sinon de
+    `cover/folder/front/albumart` du dossier ;
+  - elle est gardée dans `cache\covers` (pas dans `kanade.db`), avec les morceaux
+    disparus ou modifiés purgés au lancement ;
+  - une image est bornée avant décodage (32 Mo, 8 000 px) et une panique est rattrapée ;
+  - l'interface demande 6 pochettes à la fois et en garde 400 ;
+  - le faux backend les dessine en SVG.
 - Base de données (`src-tauri/src/store`) : un seul fichier, `kanade.db`, dans
   `%LOCALAPPDATA%\fr.devsecopsforce.kanade` (jamais un dossier synchronisé), ouvert au
   lancement. Tout y est précieux (morceaux et leurs identifiants, puis données de
