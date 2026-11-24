@@ -11,6 +11,7 @@ use std::path::Path;
 
 use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params, params_from_iter};
+use serde::{Deserialize, Serialize};
 
 use crate::store::{self, StoreError};
 
@@ -23,7 +24,8 @@ const FILE_COLUMNS: &str = "path, size, modified_ms, format, title, artist, albu
 
 /// A track's identity in the index: the same after its file is renamed or
 /// moved, and never given to another track.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct TrackId(pub i64);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,6 +89,9 @@ pub struct Changes {
     /// it changes once more.
     pub restamp: Vec<(TrackId, FileStamp)>,
     pub remove: Vec<TrackId>,
+    /// When the new tracks were found: their date added, which a move or
+    /// a new reading of the file does not change.
+    pub added_ms: i64,
 }
 
 impl Changes {
@@ -204,7 +209,7 @@ impl Index {
             }
         }
         update_tracks(&tx, &changes.update)?;
-        insert_tracks(&tx, &changes.insert)?;
+        insert_tracks(&tx, &changes.insert, changes.added_ms)?;
         {
             let mut mark = tx.prepare(
                 "UPDATE tracks SET status = ?2, status_since_ms = ?3, status_reason = ?4, \
@@ -218,7 +223,7 @@ impl Index {
                 mark_one(id.0, status)?;
             }
             for (track, status) in &changes.insert_unreadable {
-                insert_tracks(&tx, std::slice::from_ref(track))?;
+                insert_tracks(&tx, std::slice::from_ref(track), changes.added_ms)?;
                 mark_one(tx.last_insert_rowid(), status)?;
             }
         }
@@ -289,13 +294,15 @@ impl Index {
     }
 }
 
-fn insert_tracks(tx: &Transaction<'_>, tracks: &[Track]) -> rusqlite::Result<()> {
+fn insert_tracks(tx: &Transaction<'_>, tracks: &[Track], added_ms: i64) -> rusqlite::Result<()> {
     let mut insert = tx.prepare(&format!(
-        "INSERT INTO tracks ({FILE_COLUMNS}) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)"
+        "INSERT INTO tracks ({FILE_COLUMNS}, added_ms) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)"
     ))?;
     for t in tracks {
-        insert.execute(params_from_iter(file_values(t)))?;
+        let mut values = file_values(t);
+        values.push(added_ms.into());
+        insert.execute(params_from_iter(values))?;
     }
     Ok(())
 }

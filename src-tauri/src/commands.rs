@@ -17,8 +17,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State, WebviewWindow, Window, WindowEvent};
 
 use crate::library::{
-    DropReport, Library, LibraryError, LibraryId, LibraryService, LibraryView, ScanErrors,
-    ScanEvents, ScanProgress, Settings,
+    DropReport, Library, LibraryError, LibraryId, LibraryService, LibraryView, RevealTarget,
+    ScanErrors, ScanEvents, ScanProgress, Settings, TrackId, TrackRow, TrackView,
 };
 
 /// The libraries list or their scans changed: the interface reads it again.
@@ -228,6 +228,46 @@ pub fn settings_set(
     libraries.get()?.save_settings(&settings)
 }
 
+/// Every track of every library, for the list.
+#[tauri::command(async)]
+pub fn tracks_list(libraries: State<'_, Libraries>) -> Result<Vec<TrackRow>, LibraryError> {
+    libraries.get()?.tracks()
+}
+
+/// « Afficher dans l'Explorateur »: the file selected, or its folder once
+/// the file is gone. The track comes by its id, never by a path.
+#[tauri::command(async)]
+pub fn track_reveal(id: TrackId, libraries: State<'_, Libraries>) -> Result<(), LibraryError> {
+    let target = libraries.get()?.reveal_target(id)?;
+    open_explorer(&target)
+}
+
+fn open_explorer(target: &RevealTarget) -> Result<(), LibraryError> {
+    let mut explorer = std::process::Command::new("explorer.exe");
+    // explorer.exe reads its command line itself: /select,"path" as is.
+    #[cfg(windows)]
+    std::os::windows::process::CommandExt::raw_arg(&mut explorer, target.explorer_argument());
+    #[cfg(not(windows))]
+    explorer.arg(target.explorer_argument());
+    explorer.spawn().map(drop).map_err(|e| LibraryError::Io {
+        message: e.to_string(),
+    })
+}
+
+/// The list's columns as last left; `None` for the default ones.
+#[tauri::command(async)]
+pub fn track_view_get(libraries: State<'_, Libraries>) -> Result<Option<TrackView>, LibraryError> {
+    libraries.get()?.track_view()
+}
+
+#[tauri::command(async)]
+pub fn track_view_set(
+    view: TrackView,
+    libraries: State<'_, Libraries>,
+) -> Result<TrackView, LibraryError> {
+    libraries.get()?.save_track_view(view)
+}
+
 /// Folders dropped on the window become libraries, checked as the
 /// picker's are; the interface is told which were added or refused.
 pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
@@ -402,6 +442,9 @@ mod tests {
                 library_errors,
                 settings_get,
                 settings_set,
+                tracks_list,
+                track_view_get,
+                track_view_set,
             ])
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap();
@@ -481,7 +524,7 @@ mod tests {
 
         assert_eq!(
             invoke(&webview, "settings_get", serde_json::json!({})).unwrap(),
-            serde_json::json!({ "scanOnStartup": true })
+            serde_json::json!({ "scanOnStartup": true, "ignoreArticles": true })
         );
         invoke(
             &webview,
@@ -491,7 +534,34 @@ mod tests {
         .unwrap();
         assert_eq!(
             invoke(&webview, "settings_get", serde_json::json!({})).unwrap(),
-            serde_json::json!({ "scanOnStartup": false })
+            serde_json::json!({ "scanOnStartup": false, "ignoreArticles": true })
+        );
+
+        // The list: an empty folder has no track; its columns as left.
+        assert_eq!(
+            invoke(&webview, "tracks_list", serde_json::json!({})).unwrap(),
+            serde_json::json!([])
+        );
+        assert_eq!(
+            invoke(&webview, "track_view_get", serde_json::json!({})).unwrap(),
+            serde_json::Value::Null
+        );
+        let view = serde_json::json!({
+            "columns": [{ "id": "title", "width": 300, "visible": true }],
+            "sort": { "column": "artist", "descending": false },
+        });
+        assert_eq!(
+            invoke(
+                &webview,
+                "track_view_set",
+                serde_json::json!({ "view": view })
+            )
+            .unwrap(),
+            view
+        );
+        assert_eq!(
+            invoke(&webview, "track_view_get", serde_json::json!({})).unwrap(),
+            view
         );
 
         assert_eq!(

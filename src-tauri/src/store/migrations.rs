@@ -14,7 +14,7 @@ use rusqlite::Connection;
 use super::{StoreError, user_version};
 
 /// The version the steps below lead to.
-pub const LATEST_VERSION: i32 = 4;
+pub const LATEST_VERSION: i32 = 5;
 
 struct Migration {
     version: i32,
@@ -115,6 +115,12 @@ CREATE TABLE settings (
     key   TEXT PRIMARY KEY NOT NULL,
     value TEXT NOT NULL
 );",
+    },
+    // KAN-3: when each track was first indexed, for the list's « Ajouté le »
+    // column. Unknown for the tracks indexed before: left empty.
+    Migration {
+        version: 5,
+        sql: "ALTER TABLE tracks ADD COLUMN added_ms INTEGER;",
     },
 ];
 
@@ -251,6 +257,22 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn step_5_leaves_the_date_added_of_older_tracks_unknown() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate_to(&mut conn, 4).unwrap();
+        conn.execute_batch(
+            "INSERT INTO tracks (path, size, modified_ms, format, has_cover)
+             VALUES ('a.flac', 1, 1, 'FLAC', 0);",
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let added: Option<i64> = conn
+            .query_row("SELECT added_ms FROM tracks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(added, None);
     }
 
     #[test]

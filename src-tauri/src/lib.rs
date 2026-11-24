@@ -84,6 +84,10 @@ pub fn run() {
             commands::library_export_errors,
             commands::settings_get,
             commands::settings_set,
+            commands::tracks_list,
+            commands::track_reveal,
+            commands::track_view_get,
+            commands::track_view_set,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -142,6 +142,8 @@ pub enum LibraryError {
     /// No library has this id (removed meanwhile).
     NotFound,
     EmptyName,
+    /// No track has this id (left the index meanwhile).
+    TrackNotFound,
     /// A file could not be written (the export of the errors).
     Io {
         message: String,
@@ -164,6 +166,7 @@ impl fmt::Display for LibraryError {
             Self::ContainsLibrary { name } => write!(f, "this folder holds the library {name}"),
             Self::NotFound => f.write_str("no such library"),
             Self::EmptyName => f.write_str("a library needs a name"),
+            Self::TrackNotFound => f.write_str("no such track"),
             Self::Io { message } => write!(f, "file error: {message}"),
             Self::Database { message } => write!(f, "library database error: {message}"),
         }
@@ -234,7 +237,10 @@ pub fn scan_folder_with(
         now_ms,
         read_online_only: control.read_online_only,
         report: ScanReport::default(),
-        changes: Changes::default(),
+        changes: Changes {
+            added_ms: now_ms,
+            ..Changes::default()
+        },
         seen: HashSet::new(),
         unreadable_dirs: Vec::new(),
         maybe_moved: Vec::new(),
