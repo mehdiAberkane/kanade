@@ -11,8 +11,11 @@ import {
   type DatabaseScenario,
   type UpdateScenario,
 } from "./dev/mockBackend";
+import { createMockLibraries, type MockLibraries } from "./dev/mockLibraries";
 
 const VERSION = "1.2.3";
+
+let libraries: MockLibraries | undefined;
 
 /** Installs the fake Rust side; returns what the test wants to watch. */
 function backend(
@@ -21,16 +24,20 @@ function backend(
   database: DatabaseScenario = "ready",
 ) {
   const calls: string[] = [];
-  mockIPC((cmd, args) => {
-    calls.push(cmd);
-    if (cmd === "app_version") {
-      if (version instanceof Error) throw version;
-      return version;
-    }
-    // jsdom cannot navigate: the restart is only recorded.
-    if (cmd === "plugin:process|restart") return null;
-    return handleMockCommand(cmd, args, { update: scenario, database });
-  });
+  libraries = createMockLibraries({ stepMs: 5 });
+  mockIPC(
+    (cmd, args) => {
+      calls.push(cmd);
+      if (cmd === "app_version") {
+        if (version instanceof Error) throw version;
+        return version;
+      }
+      // jsdom cannot navigate: the restart is only recorded.
+      if (cmd === "plugin:process|restart") return null;
+      return handleMockCommand(cmd, args, { update: scenario, database, libraries });
+    },
+    { shouldMockEvents: true },
+  );
   return { calls };
 }
 
@@ -57,26 +64,27 @@ async function openSettings() {
 afterEach(async () => {
   const { cleanup } = await import("@testing-library/react");
   cleanup();
-  clearMocks();
+  libraries?.dispose();
   vi.useRealTimers();
+  // The listeners stop once their promise settles: before the mocks go.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  clearMocks();
 });
 
 describe("App", () => {
-  it("shows the version the Rust side returns on the home screen", async () => {
+  it("opens on the libraries", async () => {
     backend();
     const { screen } = await renderApp();
-    expect(
-      await screen.findByText(`Gestionnaire de bibliothèque musicale — v${VERSION}`),
-    ).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Bibliothèques" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Musique" })).toBeTruthy();
   });
 
-  it("shows no version, and a placeholder in the settings, when the Rust side fails", async () => {
+  it("shows a placeholder for the version in the settings when the Rust side fails", async () => {
     const { calls } = backend("none", new Error("backend unavailable"));
     const { screen, user, waitFor } = await renderApp();
     await waitFor(() => {
       expect(calls).toContain("app_version");
     });
-    expect(screen.getByText("Gestionnaire de bibliothèque musicale")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Réglages" }));
     expect(screen.getByText("…")).toBeTruthy();
   });
@@ -89,7 +97,7 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "Réglages" })).toBeTruthy();
     expect(settings.getAttribute("aria-current")).toBe("page");
     await user.click(screen.getByRole("button", { name: "Bibliothèque" }));
-    expect(screen.getByRole("heading", { name: "Kanade" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Bibliothèques" })).toBeTruthy();
   });
 });
 

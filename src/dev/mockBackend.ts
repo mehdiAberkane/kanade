@@ -6,6 +6,12 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import type { InvokeArgs } from "@tauri-apps/api/core";
 import type { DownloadEvent } from "@tauri-apps/plugin-updater";
 import type { DatabaseStatus } from "../lib/database";
+import {
+  createMockLibraries,
+  librariesScenario,
+  NOT_MINE,
+  type MockLibraries,
+} from "./mockLibraries";
 
 export const MOCK_VERSION = "0.0.0-dev";
 export const MOCK_NEXT_VERSION = "0.0.1-dev";
@@ -39,7 +45,11 @@ export function databaseScenario(search: string): DatabaseScenario {
 export interface Scenarios {
   update?: UpdateScenario;
   database?: DatabaseScenario;
+  /** The fake libraries (mockLibraries.ts); sample ones by default. */
+  libraries?: MockLibraries;
 }
+
+let sampleLibraries: MockLibraries | undefined;
 
 const MOCK_BROKEN = String.raw`C:\Users\you\AppData\Local\fr.devsecopsforce.kanade\kanade-broken-20261124-101500.db`;
 
@@ -117,9 +127,13 @@ export function handleMockCommand(
       window.location.replace(window.location.pathname);
       return null;
 
-    default:
+    default: {
+      const libraries = scenarios.libraries ?? (sampleLibraries ??= createMockLibraries());
+      const answer = libraries.handle(cmd, args);
+      if (answer !== NOT_MINE) return answer;
       // A command without a mock fails loudly instead of returning nothing.
       throw new Error(`No mock for the Rust command "${cmd}" in src/dev/mockBackend.ts`);
+    }
   }
 }
 
@@ -127,6 +141,8 @@ export function installMockBackend(): void {
   const scenarios: Scenarios = {
     update: updateScenario(window.location.search),
     database: databaseScenario(window.location.search),
+    libraries: createMockLibraries({ scenario: librariesScenario(window.location.search) }),
   };
-  mockIPC((cmd, args) => handleMockCommand(cmd, args, scenarios));
+  // The events (scan progress, libraries changed) go to the listeners too.
+  mockIPC((cmd, args) => handleMockCommand(cmd, args, scenarios), { shouldMockEvents: true });
 }

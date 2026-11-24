@@ -1,5 +1,6 @@
 import { statusLine } from "../lib/updater";
 import { useUpdater } from "../lib/useUpdater";
+import { LibrarySettings } from "./LibrarySettings";
 
 interface Props {
   /** Installed version, from the Rust side; empty until it answers. */
@@ -14,6 +15,8 @@ export function SettingsPage({ version }: Props) {
   return (
     <section className="page settings">
       <h1>Réglages</h1>
+
+      <LibrarySettings />
 
       <div className="settings-section">
         <h2>Mises à jour</h2>
