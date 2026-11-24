@@ -1,12 +1,25 @@
 //! One audio file: is it music, and what do its tags say.
+//!
+//! The files come from anywhere (downloads, old CD rips, truncated copies,
+//! files made on purpose): reading one never takes Kanade down. A panic in
+//! lofty is caught, each tag item is capped in memory, and an error says
+//! whether trying again later may help (`ReadErrorKind`).
 
+use std::fmt;
 use std::fs;
+use std::io;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
+use std::sync::Once;
 use std::time::UNIX_EPOCH;
 
-use lofty::file::FileType;
+use lofty::config::{GlobalOptions, ParseOptions, ParsingMode, apply_global_options};
+use lofty::error::AllocationError;
+use lofty::file::{FileType, TaggedFile};
 use lofty::prelude::*;
+use lofty::probe::Probe;
 use lofty::tag::{ItemKey, Tag};
+use serde::Serialize;
 
 /// Extensions of the audio files Kanade lists, in lower case.
 const AUDIO_EXTENSIONS: &[&str] = &[
@@ -16,6 +29,17 @@ const AUDIO_EXTENSIONS: &[&str] = &[
 
 /// Extensions listed without their tags: lofty cannot read them (WMA).
 const UNTAGGED_EXTENSIONS: &[&str] = &["wma"];
+
+/// The most memory lofty may take for one tag item (a cover, a text): a
+/// file announcing more is read without its covers.
+pub const ALLOCATION_LIMIT: usize = 16 * 1024 * 1024;
+
+/// Files bigger than this are not read: no audio file of a music library
+/// comes near it, a file that does is something else.
+pub const MAX_FILE_SIZE: u64 = 4 * 1024 * 1024 * 1024;
+
+/// Characters kept per tag value: a title of 10 MB has no place in the index.
+pub const MAX_TAG_CHARS: usize = 1024;
 
 /// What the index keeps about one audio file. Missing tags are `None`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +61,30 @@ pub struct Track {
 }
 
 impl Track {
+    /// A track known only by its file: no tags, the format from the
+    /// extension (WMA files, and files that could not be read).
+    pub fn bare(path: String, stamp: FileStamp) -> Self {
+        let format = extension(Path::new(&path))
+            .unwrap_or_default()
+            .to_ascii_uppercase();
+        Self {
+            path,
+            stamp,
+            format,
+            title: None,
+            artist: None,
+            album_artist: None,
+            album: None,
+            track_number: None,
+            disc_number: None,
+            year: None,
+            genre: None,
+            duration_ms: None,
+            bitrate_kbps: None,
+            has_cover: false,
+        }
+    }
+
     /// The title to show: the tag, or else the file name without its extension.
     pub fn display_title(&self) -> String {
         self.title.clone().unwrap_or_else(|| {
@@ -69,6 +117,56 @@ impl FileStamp {
     }
 }
 
+/// Why a file could not be read, which decides whether a scan tries again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadErrorKind {
+    /// The file could not be opened or read (locked by another program,
+    /// permission, network share): tried again at every scan.
+    Access,
+    /// The file was read but its content is not usable audio (damaged,
+    /// truncated, too big): tried again only once the file changes.
+    Content,
+    /// lofty panicked on it: caught, treated as damaged content, and worth
+    /// reporting to lofty.
+    Panic,
+}
+
+impl ReadErrorKind {
+    /// Whether a scan should read the file again even if it did not change.
+    pub fn retry(self) -> bool {
+        self == Self::Access
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadError {
+    pub kind: ReadErrorKind,
+    pub message: String,
+}
+
+impl ReadError {
+    pub fn access(message: impl Into<String>) -> Self {
+        Self {
+            kind: ReadErrorKind::Access,
+            message: message.into(),
+        }
+    }
+
+    pub fn content(message: impl Into<String>) -> Self {
+        Self {
+            kind: ReadErrorKind::Content,
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for ReadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
 fn extension(path: &Path) -> Option<String> {
     path.extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
@@ -79,36 +177,42 @@ pub fn is_audio_file(path: &Path) -> bool {
     extension(path).is_some_and(|e| AUDIO_EXTENSIONS.contains(&e.as_str()))
 }
 
-/// Reads the tags and audio properties of one file. An unreadable or
-/// corrupted file gives an error, never a panic.
-pub fn read_track(path: &Path, stamp: FileStamp) -> Result<Track, String> {
+/// lofty's limits, set once for the whole process.
+fn configure_lofty() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        apply_global_options(GlobalOptions::new().allocation_limit(ALLOCATION_LIMIT));
+    });
+}
+
+/// Reads the tags and audio properties of one file. A damaged or hostile
+/// file gives an error, never a panic nor an unbounded allocation.
+pub fn read_track(path: &Path, stamp: FileStamp) -> Result<Track, ReadError> {
     let path_str = path
         .to_str()
-        .ok_or_else(|| format!("path is not valid UTF-8: {}", path.display()))?
+        .ok_or_else(|| ReadError::content(format!("path is not valid UTF-8: {}", path.display())))?
         .to_owned();
-    let mut track = Track {
-        path: path_str,
-        stamp,
-        format: String::new(),
-        title: None,
-        artist: None,
-        album_artist: None,
-        album: None,
-        track_number: None,
-        disc_number: None,
-        year: None,
-        genre: None,
-        duration_ms: None,
-        bitrate_kbps: None,
-        has_cover: false,
-    };
-
-    if let Some(ext) = extension(path).filter(|e| UNTAGGED_EXTENSIONS.contains(&e.as_str())) {
-        track.format = ext.to_ascii_uppercase();
+    let mut track = Track::bare(path_str, stamp);
+    if UNTAGGED_EXTENSIONS.contains(&track.format.to_ascii_lowercase().as_str()) {
         return Ok(track);
     }
+    if stamp.size > MAX_FILE_SIZE {
+        return Err(ReadError::content(format!(
+            "file too large to be audio ({} bytes)",
+            stamp.size
+        )));
+    }
 
-    let tagged = lofty::read_from_path(path).map_err(|e| e.to_string())?;
+    configure_lofty();
+    let tagged = match parse(path, true) {
+        Err(failure) if failure.allocation => {
+            // A cover (or a tag item) bigger than ALLOCATION_LIMIT: the
+            // tags without the covers, and the file does have one.
+            track.has_cover = true;
+            parse(path, false).map_err(|f| f.error)?
+        }
+        other => other.map_err(|f| f.error)?,
+    };
     track.format = format_name(tagged.file_type()).to_owned();
 
     let properties = tagged.properties();
@@ -118,12 +222,93 @@ pub fn read_track(path: &Path, stamp: FileStamp) -> Result<Track, String> {
         .audio_bitrate()
         .or_else(|| properties.overall_bitrate())
         .filter(|b| *b > 0);
-    track.has_cover = tagged.tags().iter().any(|t| t.picture_count() > 0);
+    track.has_cover |= tagged.tags().iter().any(|t| t.picture_count() > 0);
 
     if let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag()) {
         fill_from_tag(&mut track, tag);
     }
     Ok(track)
+}
+
+struct ParseFailure {
+    error: ReadError,
+    /// lofty refused an item bigger than ALLOCATION_LIMIT.
+    allocation: bool,
+}
+
+/// One lofty read, with its panics caught.
+fn parse(path: &Path, read_covers: bool) -> Result<TaggedFile, ParseFailure> {
+    // Opening is where a locked file or a lost share fails: an access
+    // problem. Past it, what goes wrong is in the file.
+    let file = fs::File::open(path).map_err(|e| ParseFailure {
+        error: ReadError::access(e.to_string()),
+        allocation: false,
+    })?;
+    let options = ParseOptions::new()
+        .parsing_mode(ParsingMode::BestAttempt)
+        .read_cover_art(read_covers);
+    let read = catch_unwind(AssertUnwindSafe(|| {
+        let reader = io::BufReader::new(file);
+        let probe = match FileType::from_path(path) {
+            Some(file_type) => Probe::with_file_type(reader, file_type),
+            None => Probe::new(reader).guess_file_type()?,
+        };
+        probe.options(options).read()
+    }));
+    match read {
+        Ok(Ok(tagged)) => Ok(tagged),
+        Ok(Err(e)) => Err(classify(&e)),
+        Err(payload) => Err(ParseFailure {
+            error: ReadError {
+                kind: ReadErrorKind::Panic,
+                message: format!("lofty panicked: {}", panic_message(payload.as_ref())),
+            },
+            allocation: false,
+        }),
+    }
+}
+
+/// The message of a caught panic (`panic!("...")` or `panic!("{x}")`).
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_default()
+}
+
+/// Reads lofty's error chain: damaged content, unless the disk or the
+/// network failed while reading (a share that dropped, a drive unplugged).
+fn classify(error: &dyn std::error::Error) -> ParseFailure {
+    use io::ErrorKind as Io;
+    let mut kind = ReadErrorKind::Content;
+    let mut allocation = false;
+    let mut message = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        if let Some(io_error) = cause.downcast_ref::<io::Error>()
+            && matches!(
+                io_error.kind(),
+                Io::PermissionDenied
+                    | Io::TimedOut
+                    | Io::ConnectionReset
+                    | Io::ConnectionAborted
+                    | Io::NotConnected
+                    | Io::BrokenPipe
+                    | Io::Interrupted
+            )
+        {
+            kind = ReadErrorKind::Access;
+        }
+        allocation |= cause.is::<AllocationError>();
+        message.push_str(": ");
+        message.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    ParseFailure {
+        error: ReadError { kind, message },
+        allocation,
+    }
 }
 
 fn fill_from_tag(track: &mut Track, tag: &Tag) {
@@ -137,12 +322,13 @@ fn fill_from_tag(track: &mut Track, tag: &Tag) {
     track.year = tag.date().map(|d| u32::from(d.year));
 }
 
-/// Trims a tag value; an empty one counts as missing.
+/// Trims a tag value and keeps its first `MAX_TAG_CHARS` characters; an
+/// empty one counts as missing.
 fn clean(value: Option<&str>) -> Option<String> {
     value
         .map(str::trim)
         .filter(|v| !v.is_empty())
-        .map(str::to_owned)
+        .map(|v| v.chars().take(MAX_TAG_CHARS).collect())
 }
 
 fn format_name(file_type: FileType) -> &'static str {
@@ -164,148 +350,4 @@ fn format_name(file_type: FileType) -> &'static str {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-    use lofty::config::WriteOptions;
-    use lofty::picture::{MimeType, Picture, PictureType};
-    use std::path::PathBuf;
-
-    /// A 1×1 PNG, used as cover art in the tests.
-    const PNG_1X1: &[u8] = &[
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
-        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
-        0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00,
-        0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
-        0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
-    ];
-
-    /// The test files: one second of a 440 Hz tone, without tags (see
-    /// tests/fixtures/README.md), with the format lofty should report.
-    pub(crate) const FIXTURES: &[(&str, &str)] = &[
-        ("tone.mp3", "MP3"),
-        ("tone.flac", "FLAC"),
-        ("tone.m4a", "MP4"),
-        ("tone.ogg", "Ogg Vorbis"),
-        ("tone.opus", "Opus"),
-        ("tone.wav", "WAV"),
-    ];
-
-    pub(crate) fn fixture(name: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests")
-            .join("fixtures")
-            .join(name)
-    }
-
-    pub(crate) fn stamp_of(path: &Path) -> FileStamp {
-        FileStamp::of(&fs::metadata(path).unwrap())
-    }
-
-    /// Copies a fixture to `dest` and writes a full set of tags into it.
-    pub(crate) fn tagged_copy(fixture_name: &str, dest: &Path, title: &str) {
-        fs::copy(fixture(fixture_name), dest).unwrap();
-        let mut file = lofty::read_from_path(dest).unwrap();
-        let tag_type = file.primary_tag_type();
-        let mut tag = Tag::new(tag_type);
-        tag.set_title(title.to_owned());
-        tag.set_artist("Kanade Test Artist".to_owned());
-        tag.set_album("Test Album".to_owned());
-        tag.insert_text(ItemKey::AlbumArtist, "Various Artists".to_owned());
-        tag.set_genre("Jazz".to_owned());
-        tag.set_track(3);
-        tag.set_disk(2);
-        tag.insert_text(ItemKey::RecordingDate, "2021".to_owned());
-        tag.push_picture(
-            Picture::unchecked(PNG_1X1.to_vec())
-                .pic_type(PictureType::CoverFront)
-                .mime_type(MimeType::Png)
-                .build(),
-        );
-        file.insert_tag(tag);
-        file.save_to_path(dest, WriteOptions::default()).unwrap();
-    }
-
-    #[test]
-    fn recognises_audio_files_by_extension() {
-        for name in ["a.mp3", "b.FLAC", "c.m4a", "d.opus", "e.wma", "f.Mp4"] {
-            assert!(is_audio_file(Path::new(name)), "{name}");
-        }
-        for name in ["cover.jpg", "notes.txt", "playlist.m3u", "no_extension"] {
-            assert!(!is_audio_file(Path::new(name)), "{name}");
-        }
-    }
-
-    #[test]
-    fn reads_format_and_duration_of_untagged_files() {
-        for (name, format) in FIXTURES {
-            let path = fixture(name);
-            let track = read_track(&path, stamp_of(&path)).unwrap();
-            assert_eq!(track.format, *format, "{name}");
-            assert_eq!(track.title, None, "{name}");
-            assert!(!track.has_cover, "{name}");
-            let ms = track
-                .duration_ms
-                .unwrap_or_else(|| panic!("{name}: no duration"));
-            // One second of audio; the MP3 encoder drops the last partial
-            // frame, so it lasts 0.89 s.
-            assert!((850..=1100).contains(&ms), "{name}: {ms} ms");
-            assert_eq!(track.display_title(), "tone", "{name}");
-        }
-    }
-
-    #[test]
-    fn reads_the_tags_of_every_format() {
-        let dir = tempfile::tempdir().unwrap();
-        for (name, format) in FIXTURES {
-            let path = dir.path().join(name);
-            tagged_copy(name, &path, "So What");
-            let track = read_track(&path, stamp_of(&path)).unwrap();
-            assert_eq!(track.format, *format, "{name}");
-            assert_eq!(track.title.as_deref(), Some("So What"), "{name}");
-            assert_eq!(
-                track.artist.as_deref(),
-                Some("Kanade Test Artist"),
-                "{name}"
-            );
-            assert_eq!(track.album.as_deref(), Some("Test Album"), "{name}");
-            assert_eq!(
-                track.album_artist.as_deref(),
-                Some("Various Artists"),
-                "{name}"
-            );
-            assert_eq!(track.genre.as_deref(), Some("Jazz"), "{name}");
-            assert_eq!(track.track_number, Some(3), "{name}");
-            assert_eq!(track.disc_number, Some(2), "{name}");
-            assert_eq!(track.year, Some(2021), "{name}");
-            assert!(track.has_cover, "{name}: cover");
-            assert!(track.bitrate_kbps.is_some(), "{name}: bitrate");
-        }
-    }
-
-    #[test]
-    fn a_corrupted_file_is_an_error_not_a_panic() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("broken.mp3");
-        fs::write(&path, b"this is not an mp3 file at all").unwrap();
-        assert!(read_track(&path, stamp_of(&path)).is_err());
-    }
-
-    #[test]
-    fn wma_files_are_listed_without_tags() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("Old Song.WMA");
-        fs::write(&path, b"not parsed: lofty cannot read WMA").unwrap();
-        let track = read_track(&path, stamp_of(&path)).unwrap();
-        assert_eq!(track.format, "WMA");
-        assert_eq!(track.title, None);
-        assert_eq!(track.duration_ms, None);
-        assert_eq!(track.display_title(), "Old Song");
-    }
-
-    #[test]
-    fn blank_tag_values_count_as_missing() {
-        assert_eq!(clean(Some("  ")), None);
-        assert_eq!(clean(Some(" Miles Davis ")), Some("Miles Davis".to_owned()));
-        assert_eq!(clean(None), None);
-    }
-}
+pub(crate) mod tests;

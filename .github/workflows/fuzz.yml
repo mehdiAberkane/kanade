@@ -1,0 +1,55 @@
+# Fuzzing of the tag reader (KAN-24), out of the pull requests' way: once a
+# week, and on demand (Actions › Fuzz › Run workflow). Tens of thousands of
+# tagged test files with random bytes changed, inserted or cut go through
+# read_track, in release mode (no panic = "abort", as in the app). The run
+# fails when lofty panics on one: the log gives the seed and iteration to
+# replay it (KANADE_FUZZ_SEED), and the panic is to be reported to lofty.
+name: Fuzz
+
+on:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz
+  cancel-in-progress: false
+
+jobs:
+  read-track:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri -> target
+          key: fuzz-v1
+
+      # Tauri embeds the built interface: Rust needs dist/ to compile.
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+
+      - name: Fuzz read_track (50,000 files, a new seed each week)
+        working-directory: src-tauri
+        shell: bash
+        env:
+          KANADE_FUZZ_ITERATIONS: "50000"
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          export KANADE_FUZZ_SEED=$(( 0x4B414E414445 + RUN_NUMBER ))
+          echo "Seed: $KANADE_FUZZ_SEED"
+          cargo test --locked --release --lib fuzzed_files_are_errors_never_panics -- --nocapture
