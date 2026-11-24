@@ -5,15 +5,16 @@
 //!
 //! Tables: `tracks` is the registry of the tracks, with their stable ids
 //! (precious: the user's data will point at them), and their tags as the
-//! last scan read them. The user's tables (libraries, playlists, ratings)
-//! will come next to it.
+//! last scan read them. `libraries` are the folders the user follows, with
+//! the errors of their last scan in `scan_errors`; `settings` holds the
+//! user's choices. Playlists and ratings will come next to them.
 
 use rusqlite::Connection;
 
 use super::{StoreError, user_version};
 
 /// The version the steps below lead to.
-pub const LATEST_VERSION: i32 = 3;
+pub const LATEST_VERSION: i32 = 4;
 
 struct Migration {
     version: i32,
@@ -89,6 +90,31 @@ CREATE INDEX tracks_by_size ON tracks (size);",
 ALTER TABLE tracks ADD COLUMN status_kind TEXT
     CHECK (status_kind IN ('access', 'content', 'panic'));
 UPDATE tracks SET status_kind = 'access' WHERE status = 'unreadable';",
+    },
+    // KAN-2: the libraries. A track belongs to the library whose root holds
+    // its path; `root_key` (paths::compare_key) makes one folder written
+    // two ways a single library. `last_scan` is the JSON of LastScan.
+    Migration {
+        version: 4,
+        sql: "
+CREATE TABLE libraries (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    name      TEXT NOT NULL,
+    root      TEXT NOT NULL,
+    root_key  TEXT NOT NULL UNIQUE,
+    added_ms  INTEGER NOT NULL,
+    last_scan TEXT
+);
+CREATE TABLE scan_errors (
+    library_id INTEGER NOT NULL REFERENCES libraries (id) ON DELETE CASCADE,
+    path       TEXT NOT NULL,
+    message    TEXT NOT NULL
+);
+CREATE INDEX scan_errors_by_library ON scan_errors (library_id);
+CREATE TABLE settings (
+    key   TEXT PRIMARY KEY NOT NULL,
+    value TEXT NOT NULL
+);",
     },
 ];
 
@@ -192,6 +218,38 @@ mod tests {
                 ("a.flac".into(), Some("access".into())),
                 ("b.flac".into(), None)
             ]
+        );
+    }
+
+    #[test]
+    fn step_4_adds_the_libraries_and_keeps_the_tracks() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate_to(&mut conn, 3).unwrap();
+        conn.execute_batch(
+            r"INSERT INTO tracks (path, size, modified_ms, format, has_cover)
+              VALUES ('D:\Musique\a.flac', 1, 1, 'FLAC', 0);",
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+        let tracks: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tracks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(tracks, 1);
+        conn.execute_batch(
+            r"INSERT INTO libraries (name, root, root_key, added_ms)
+              VALUES ('Musique', 'D:\Musique', 'd:\musique', 1);
+              INSERT INTO settings (key, value) VALUES ('scan_on_startup', 'false');",
+        )
+        .unwrap();
+        // One folder, one library.
+        assert!(
+            conn.execute(
+                r"INSERT INTO libraries (name, root, root_key, added_ms)
+                  VALUES ('Bis', 'd:\musique', 'd:\musique', 2)",
+                [],
+            )
+            .is_err()
         );
     }
 

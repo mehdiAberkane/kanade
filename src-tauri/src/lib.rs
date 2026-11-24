@@ -2,11 +2,14 @@
 // the memory-safety risks stay in the crates it depends on.
 #![forbid(unsafe_code)]
 
+mod commands;
 pub mod library;
 pub mod store;
 
 use std::path::Path;
 
+use commands::{Libraries, TauriEvents};
+use library::{LibraryService, ScanEvents, TooBroad};
 use store::{DatabaseStatus, StoreError};
 use tauri::Manager;
 
@@ -27,17 +30,25 @@ fn database_status(status: tauri::State<'_, DatabaseStatus>) -> DatabaseStatus {
 
 /// Opens the database in the app's local data folder
 /// (`%LOCALAPPDATA%\fr.devsecopsforce.kanade`), which also restores it,
-/// migrates it and takes the daily backup. Nothing reads the tracks yet:
-/// the screens of KAN-2 will keep the connection.
-fn open_database(dir: Result<&Path, String>) -> DatabaseStatus {
-    match dir {
-        Ok(dir) => match store::open(dir, store::now_ms()) {
-            Ok(opened) => opened.status,
-            Err(error) => DatabaseStatus::Failed { error },
-        },
-        Err(message) => DatabaseStatus::Failed {
-            error: StoreError::Io { message },
-        },
+/// migrates it and takes the daily backup, then starts the libraries and,
+/// if the settings say so, their scan. Without a database, the app still
+/// starts and says why.
+fn open_database(
+    dir: Result<&Path, String>,
+    events: impl ScanEvents,
+) -> (DatabaseStatus, Libraries) {
+    let opened = dir
+        .map_err(|message| StoreError::Io { message })
+        .and_then(|dir| Ok((store::open(dir, store::now_ms())?, store::open_writer(dir)?)));
+    match opened {
+        Ok((opened, scan_index)) => {
+            let service =
+                LibraryService::new(opened.index, scan_index, events, TooBroad::from_env());
+            // Settings that cannot be read: no scan at launch, the rest works.
+            let _ = service.scan_on_startup();
+            (opened.status, Libraries(Some(service)))
+        }
+        Err(error) => (DatabaseStatus::Failed { error }, Libraries(None)),
     }
 }
 
@@ -50,11 +61,30 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let dir = app.path().app_local_data_dir();
-            let status = open_database(dir.as_deref().map_err(ToString::to_string));
+            let (status, libraries) = open_database(
+                dir.as_deref().map_err(ToString::to_string),
+                TauriEvents(app.handle().clone()),
+            );
             app.manage(status);
+            app.manage(libraries);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![app_version, database_status])
+        .on_window_event(commands::on_window_event)
+        .invoke_handler(tauri::generate_handler![
+            app_version,
+            database_status,
+            commands::libraries_list,
+            commands::library_add,
+            commands::library_rename,
+            commands::library_remove,
+            commands::library_scan,
+            commands::library_cancel_scan,
+            commands::library_relocate,
+            commands::library_errors,
+            commands::library_export_errors,
+            commands::settings_get,
+            commands::settings_set,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -62,6 +92,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::library::scanner::Recorder;
 
     /// The updater settings that installed copies rely on: a wrong endpoint or
     /// key, and no update ever reaches them again.
@@ -99,21 +130,28 @@ mod tests {
     #[test]
     fn the_database_opens_at_launch_and_says_how() {
         let dir = tempfile::tempdir().unwrap();
-        assert_eq!(open_database(Ok(dir.path())), DatabaseStatus::Ready);
+        let (status, libraries) = open_database(Ok(dir.path()), Recorder::default());
+        assert_eq!(status, DatabaseStatus::Ready);
         assert!(dir.path().join(store::DB_FILE).exists());
+        assert!(libraries.0.unwrap().list().unwrap().is_empty());
 
-        // A database that cannot open: the interface is told why.
+        // A database that cannot open: the interface is told why, and the
+        // libraries are not there.
         let file = tempfile::NamedTempFile::new().unwrap();
+        let (status, libraries) = open_database(Ok(file.path()), Recorder::default());
         assert!(matches!(
-            open_database(Ok(file.path())),
+            status,
             DatabaseStatus::Failed {
                 error: StoreError::Io { .. }
             }
         ));
+        assert!(libraries.0.is_none());
 
         // No local data folder: the interface is told, the app still starts.
+        let (status, _) =
+            open_database(Err("no local data folder".to_owned()), Recorder::default());
         assert_eq!(
-            open_database(Err("no local data folder".to_owned())),
+            status,
             DatabaseStatus::Failed {
                 error: StoreError::Io {
                     message: "no local data folder".to_owned()

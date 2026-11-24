@@ -8,6 +8,7 @@ use std::fmt;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use walkdir::WalkDir;
 
 use super::index::{Candidate, Changes, Index, Known, TrackId, TrackStatus};
@@ -51,8 +52,12 @@ pub struct ScanReport {
     /// Errors beyond `MAX_ERRORS_KEPT`, counted only.
     pub errors_omitted: usize,
     /// Files kept online only (OneDrive, Google Drive...): not read, since
-    /// reading would download them. KAN-2 asks before.
+    /// reading would download them, unless the user asked for it
+    /// (`ScanControl::read_online_only`).
     pub online_only: usize,
+    /// The scan was stopped before the end: what it read is written, and no
+    /// track was marked missing, since not every folder was walked.
+    pub cancelled: bool,
 }
 
 impl ScanReport {
@@ -63,12 +68,44 @@ impl ScanReport {
             self.errors_omitted += 1;
         }
     }
+
+    /// Every error, kept or only counted.
+    pub fn error_count(&self) -> usize {
+        self.errors.len() + self.errors_omitted
+    }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ScanError {
     pub path: String,
     pub message: String,
+}
+
+/// Where a running scan stands, for the interface.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanProgress {
+    /// Audio files met so far.
+    pub seen: usize,
+    pub added: usize,
+    /// Files read again, and moved files.
+    pub updated: usize,
+    /// Tracks marked missing or gone from the index.
+    pub removed: usize,
+    pub errors: usize,
+    /// The folder being walked.
+    pub folder: String,
+}
+
+/// How a scan runs: what it reads, whom it tells, when it stops.
+pub struct ScanControl<'a> {
+    /// Read the files kept online only too, which downloads them.
+    pub read_online_only: bool,
+    /// Set from another thread to stop the scan (see `ScanReport::cancelled`).
+    pub cancel: &'a AtomicBool,
+    /// Called at each folder and each audio file: the caller decides how
+    /// often to pass it on.
+    pub progress: &'a mut dyn FnMut(&ScanProgress),
 }
 
 /// Errors the interface shows, each with a stable code it translates.
@@ -79,6 +116,34 @@ pub enum LibraryError {
     /// down). The index is left untouched rather than emptied.
     RootUnavailable {
         root: String,
+        message: String,
+    },
+    /// A file was given where a folder is expected (dropped on the window).
+    NotAFolder {
+        path: String,
+    },
+    /// The root of the system drive, or a folder holding the whole user
+    /// profile: far more than music.
+    TooBroad {
+        root: String,
+    },
+    /// The folder is already the library `name`.
+    AlreadyAdded {
+        name: String,
+    },
+    /// The folder is inside the library `name`: its files would count twice.
+    InsideLibrary {
+        name: String,
+    },
+    /// The folder holds the library `name`: its files would count twice.
+    ContainsLibrary {
+        name: String,
+    },
+    /// No library has this id (removed meanwhile).
+    NotFound,
+    EmptyName,
+    /// A file could not be written (the export of the errors).
+    Io {
         message: String,
     },
     Database {
@@ -92,6 +157,14 @@ impl fmt::Display for LibraryError {
             Self::RootUnavailable { root, message } => {
                 write!(f, "folder unavailable: {root} ({message})")
             }
+            Self::NotAFolder { path } => write!(f, "not a folder: {path}"),
+            Self::TooBroad { root } => write!(f, "folder too broad to be a library: {root}"),
+            Self::AlreadyAdded { name } => write!(f, "this folder is already the library {name}"),
+            Self::InsideLibrary { name } => write!(f, "this folder is inside the library {name}"),
+            Self::ContainsLibrary { name } => write!(f, "this folder holds the library {name}"),
+            Self::NotFound => f.write_str("no such library"),
+            Self::EmptyName => f.write_str("a library needs a name"),
+            Self::Io { message } => write!(f, "file error: {message}"),
             Self::Database { message } => write!(f, "library database error: {message}"),
         }
     }
@@ -126,6 +199,23 @@ pub fn scan_folder_at(
     root: &Path,
     now_ms: i64,
 ) -> Result<ScanReport, LibraryError> {
+    static NEVER: AtomicBool = AtomicBool::new(false);
+    let mut control = ScanControl {
+        read_online_only: false,
+        cancel: &NEVER,
+        progress: &mut |_| {},
+    };
+    scan_folder_with(index, root, now_ms, &mut control)
+}
+
+/// Brings the index up to date with the audio files under `root`, at
+/// `now_ms`, as `control` says.
+pub fn scan_folder_with(
+    index: &mut Index,
+    root: &Path,
+    now_ms: i64,
+    control: &mut ScanControl<'_>,
+) -> Result<ScanReport, LibraryError> {
     // One spelling for a folder Windows sees as one (case, `/`, short
     // names, `\\?\`): the walked paths then come in the real case of the
     // disk, the same at every scan.
@@ -142,16 +232,26 @@ pub fn scan_folder_at(
     let mut scan = Scan {
         known: index.known_under(root)?,
         now_ms,
+        read_online_only: control.read_online_only,
         report: ScanReport::default(),
         changes: Changes::default(),
         seen: HashSet::new(),
         unreadable_dirs: Vec::new(),
         maybe_moved: Vec::new(),
+        progress: ScanProgress::default(),
     };
 
     for entry in WalkDir::new(root).follow_links(false) {
+        if control.cancel.load(Ordering::Relaxed) {
+            scan.report.cancelled = true;
+            break;
+        }
         match entry {
+            Ok(entry) if entry.file_type().is_dir() => {
+                scan.progress.folder = entry.path().display().to_string();
+            }
             Ok(entry) if entry.file_type().is_file() && is_audio_file(entry.path()) => {
+                scan.progress.seen += 1;
                 scan.file(index, &entry)?;
             }
             Ok(_) => {}
@@ -171,16 +271,23 @@ pub fn scan_folder_at(
             index.apply(&scan.changes)?;
             scan.changes.clear();
         }
+        scan.tell(control);
     }
 
-    scan.finish(index, root)?;
+    // Stopped halfway, the scan has not seen every file: none is taken for
+    // gone, and the possible moves wait for the next scan.
+    if !scan.report.cancelled {
+        scan.finish(index, root)?;
+    }
     index.apply(&scan.changes)?;
+    scan.tell(control);
     Ok(scan.report)
 }
 
 struct Scan {
     known: HashMap<String, Known>,
     now_ms: i64,
+    read_online_only: bool,
     report: ScanReport,
     changes: Changes,
     seen: HashSet<String>,
@@ -188,9 +295,20 @@ struct Scan {
     /// New files with the same content as an indexed track: moves, or
     /// copies. Settled once the whole folder has been walked.
     maybe_moved: Vec<Track>,
+    progress: ScanProgress,
 }
 
 impl Scan {
+    /// Passes where the scan stands to `control`.
+    fn tell(&mut self, control: &mut ScanControl<'_>) {
+        let report = &self.report;
+        self.progress.added = report.added;
+        self.progress.updated = report.updated + report.moved;
+        self.progress.removed = report.missing + report.removed;
+        self.progress.errors = report.error_count();
+        (control.progress)(&self.progress);
+    }
+
     fn file(&mut self, index: &Index, entry: &walkdir::DirEntry) -> Result<(), LibraryError> {
         let Some(path) = entry.path().to_str().map(str::to_owned) else {
             // Windows allows names that are not valid Unicode (a lone
@@ -206,8 +324,9 @@ impl Scan {
         let known = self.known.get(&key).cloned();
 
         let stamp = match entry.metadata() {
-            Ok(m) if paths::is_online_only(&m) => {
-                // Reading it would download it from the cloud: not now.
+            Ok(m) if paths::is_online_only(&m) && !self.read_online_only => {
+                // Reading it would download it from the cloud: only when the
+                // user asks.
                 self.report.online_only += 1;
                 return Ok(());
             }
@@ -1017,14 +1136,6 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn online_only_files_are_not_read() {
-        let set_offline = |path: &Path| {
-            let status = std::process::Command::new("attrib")
-                .arg("+O")
-                .arg(path)
-                .status()
-                .unwrap();
-            assert!(status.success());
-        };
         let dir = library();
         let mut index = Index::open_in_memory().unwrap();
         scan(&mut index, dir.path());
@@ -1040,5 +1151,138 @@ mod tests {
         assert_eq!((report.added, report.missing), (0, 0));
         assert_eq!(status_of(&index, id), TrackStatus::Present);
         assert!(index.track_by_path(&stored(&cloud)).unwrap().is_none());
+    }
+
+    /// The attribute OneDrive puts on a file kept online only
+    /// (FILE_ATTRIBUTE_OFFLINE), set with attrib.
+    #[cfg(windows)]
+    fn set_offline(path: &Path) {
+        let status = std::process::Command::new("attrib")
+            .arg("+O")
+            .arg(path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    /// « Les télécharger et les lire »: the user asked, the files are read.
+    #[cfg(windows)]
+    #[test]
+    fn online_only_files_are_read_when_the_user_asks() {
+        let dir = tempfile::tempdir().unwrap();
+        let cloud = dir.path().join("cloud.mp3");
+        fs::copy(fixture("tone.mp3"), &cloud).unwrap();
+        set_offline(&cloud);
+        let mut index = Index::open_in_memory().unwrap();
+        let never = AtomicBool::new(false);
+        let mut control = ScanControl {
+            read_online_only: true,
+            cancel: &never,
+            progress: &mut |_| {},
+        };
+        let report = scan_folder_with(&mut index, dir.path(), NOW, &mut control).unwrap();
+        assert_eq!((report.added, report.online_only), (1, 0), "{report:?}");
+    }
+
+    // --- Progress and cancel (KAN-2) ----------------------------------------
+
+    #[test]
+    fn a_scan_tells_where_it_stands() {
+        let dir = library();
+        let mut index = Index::open_in_memory().unwrap();
+        let never = AtomicBool::new(false);
+        let mut told: Vec<ScanProgress> = Vec::new();
+        let report = {
+            let mut control = ScanControl {
+                read_online_only: false,
+                cancel: &never,
+                progress: &mut |p| told.push(p.clone()),
+            };
+            scan_folder_with(&mut index, dir.path(), NOW, &mut control).unwrap()
+        };
+        let last = told.last().unwrap();
+        // Every audio file, broken.mp3 included.
+        assert_eq!(last.seen, listed() + 1);
+        assert_eq!((last.added, last.errors), (report.added, 1));
+        assert!(told.iter().any(|p| p.folder.ends_with("Untagged")));
+        assert!(told.windows(2).all(|w| w[0].seen <= w[1].seen));
+
+        // A deleted file shows as removed.
+        fs::remove_file(dir.path().join("tone.mp3")).unwrap();
+        told.clear();
+        let mut control = ScanControl {
+            read_online_only: false,
+            cancel: &never,
+            progress: &mut |p| told.push(p.clone()),
+        };
+        scan_folder_with(&mut index, dir.path(), NOW, &mut control).unwrap();
+        assert_eq!(told.last().unwrap().removed, 1);
+    }
+
+    /// The index as a list: path, title and status of each track.
+    fn snapshot(index: &Index) -> Vec<(String, Option<String>, &'static str)> {
+        index
+            .tracks()
+            .unwrap()
+            .into_iter()
+            .map(|t| {
+                let status = match t.status {
+                    TrackStatus::Present => "present",
+                    TrackStatus::Unreadable { .. } => "unreadable",
+                    TrackStatus::Missing { .. } => "missing",
+                };
+                (t.track.path, t.track.title, status)
+            })
+            .collect()
+    }
+
+    /// Stopped after three files, then scanned again: the same index as one
+    /// full scan.
+    #[test]
+    fn a_cancelled_scan_keeps_what_it_read_and_the_next_one_finishes() {
+        let dir = library();
+        let mut index = Index::open_in_memory().unwrap();
+        let cancel = AtomicBool::new(false);
+        let mut stop_after_three = |p: &ScanProgress| {
+            if p.seen >= 3 {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        };
+        let mut control = ScanControl {
+            read_online_only: false,
+            cancel: &cancel,
+            progress: &mut stop_after_three,
+        };
+        let report = scan_folder_with(&mut index, dir.path(), NOW, &mut control).unwrap();
+        assert!(report.cancelled);
+        let written = index.count().unwrap();
+        assert!((1..indexed()).contains(&written), "{written}");
+
+        let report = scan(&mut index, dir.path());
+        assert!(!report.cancelled);
+        let mut full = Index::open_in_memory().unwrap();
+        scan(&mut full, dir.path());
+        assert_eq!(snapshot(&index), snapshot(&full));
+    }
+
+    /// A scan stopped before it walked every folder takes no file for gone.
+    #[test]
+    fn a_cancelled_scan_marks_nothing_missing() {
+        let dir = library();
+        let mut index = Index::open_in_memory().unwrap();
+        scan(&mut index, dir.path());
+        let id = id_of(&index, &dir.path().join("tone.mp3"));
+        fs::remove_file(dir.path().join("tone.mp3")).unwrap();
+
+        let cancelled = AtomicBool::new(true);
+        let mut control = ScanControl {
+            read_online_only: false,
+            cancel: &cancelled,
+            progress: &mut |_| {},
+        };
+        let report = scan_folder_with(&mut index, dir.path(), NOW, &mut control).unwrap();
+        assert!(report.cancelled);
+        assert_eq!(report.missing, 0);
+        assert_eq!(status_of(&index, id), TrackStatus::Present);
     }
 }

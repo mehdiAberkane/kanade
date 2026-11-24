@@ -3,8 +3,9 @@
 //!
 //! One file, `kanade.db`, in the app's local data folder: never a synced
 //! folder, SQLite and file sync do not mix. It holds the tracks with their
-//! stable ids and, later, the user's data that points at them (libraries,
-//! playlists, ratings): all precious, so the whole file is backed up.
+//! stable ids, the libraries and settings of the user and, later, the data
+//! that points at the tracks (playlists, ratings): all precious, so the
+//! whole file is backed up.
 //! Heavy data a scan can rebuild (cover thumbnails, audio fingerprints) will
 //! live in a cache of its own.
 
@@ -163,6 +164,18 @@ pub fn open(dir: &Path, now_ms: i64) -> Result<Opened, StoreError> {
         index: Index::from_connection(conn),
         status,
     })
+}
+
+/// One more connection that writes to `kanade.db` in `dir`, already opened
+/// and migrated by `open`: the scans write on their own, without holding up
+/// the commands of the interface.
+pub fn open_writer(dir: &Path) -> Result<Index, StoreError> {
+    let conn = Connection::open_with_flags(
+        dir.join(DB_FILE),
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    configure(&conn)?;
+    Ok(Index::from_connection(conn))
 }
 
 /// A read-only connection to `kanade.db` in `dir`: with the WAL journal, it
