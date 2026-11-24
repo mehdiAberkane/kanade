@@ -14,7 +14,7 @@ use rusqlite::{Connection, OptionalExtension, Row, Transaction, params, params_f
 
 use crate::store::{self, StoreError};
 
-use super::track::{FileStamp, Track};
+use super::track::{FileStamp, ReadErrorKind, Track};
 
 /// The file's columns, in the order of `track_from_row`.
 const FILE_COLUMNS: &str = "path, size, modified_ms, format, title, artist, album_artist, album, \
@@ -28,11 +28,13 @@ pub struct TrackId(pub i64);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TrackStatus {
     Present,
-    /// The file is there but could not be read (locked by another program,
-    /// damaged): the last tags read are kept.
+    /// The file is there but could not be read: the last tags read are
+    /// kept. `kind` says whether a scan tries again (locked, `Access`) or
+    /// waits for the file to change (damaged, `Content` or `Panic`).
     Unreadable {
         since_ms: i64,
         reason: String,
+        kind: ReadErrorKind,
     },
     /// The file is gone: the track is kept for a while, so a move done in
     /// two steps (cut, scan, paste) finds it again.
@@ -70,17 +72,28 @@ pub struct Candidate {
 pub struct Changes {
     /// New tracks.
     pub insert: Vec<Track>,
+    /// New files that could not be read: indexed with their status, so the
+    /// next scans know them.
+    pub insert_unreadable: Vec<(Track, TrackStatus)>,
     /// Files read again or moved: new path and tags for an existing track,
     /// present again.
     pub update: Vec<(TrackId, Track)>,
     /// Tracks that became unreadable or missing.
     pub mark: Vec<(TrackId, TrackStatus)>,
+    /// New size and date of a damaged file, so it is not read again until
+    /// it changes once more.
+    pub restamp: Vec<(TrackId, FileStamp)>,
     pub remove: Vec<TrackId>,
 }
 
 impl Changes {
     pub fn len(&self) -> usize {
-        self.insert.len() + self.update.len() + self.mark.len() + self.remove.len()
+        self.insert.len()
+            + self.insert_unreadable.len()
+            + self.update.len()
+            + self.mark.len()
+            + self.restamp.len()
+            + self.remove.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -89,8 +102,10 @@ impl Changes {
 
     pub fn clear(&mut self) {
         self.insert.clear();
+        self.insert_unreadable.clear();
         self.update.clear();
         self.mark.clear();
+        self.restamp.clear();
         self.remove.clear();
     }
 }
@@ -117,8 +132,8 @@ impl Index {
     /// component: `C:\Music` does not contain `C:\Music2`).
     pub fn known_under(&self, root: &Path) -> rusqlite::Result<HashMap<String, Known>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, path, size, modified_ms, status, status_since_ms, status_reason \
-             FROM tracks",
+            "SELECT id, path, size, modified_ms, status, status_since_ms, status_reason, \
+             status_kind FROM tracks",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok((
@@ -147,7 +162,7 @@ impl Index {
     /// `track`, wherever their file is: the candidates for a moved file.
     pub fn same_content(&self, track: &Track) -> rusqlite::Result<Vec<Candidate>> {
         let mut stmt = self.conn.prepare_cached(
-            "SELECT id, path, status, status_since_ms, status_reason FROM tracks \
+            "SELECT id, path, status, status_since_ms, status_reason, status_kind FROM tracks \
              WHERE size = ?1 AND format = ?2 AND duration_ms IS ?3 AND title IS ?4 \
              AND artist IS ?5 AND album_artist IS ?6 AND album IS ?7 \
              AND track_number IS ?8 AND disc_number IS ?9",
@@ -189,12 +204,26 @@ impl Index {
         insert_tracks(&tx, &changes.insert)?;
         {
             let mut mark = tx.prepare(
-                "UPDATE tracks SET status = ?2, status_since_ms = ?3, status_reason = ?4 \
-                 WHERE id = ?1",
+                "UPDATE tracks SET status = ?2, status_since_ms = ?3, status_reason = ?4, \
+                 status_kind = ?5 WHERE id = ?1",
             )?;
+            let mut mark_one = |id: i64, status: &TrackStatus| {
+                let (name, since, reason, kind) = status_columns(status);
+                mark.execute(params![id, name, since, reason, kind])
+            };
             for (id, status) in &changes.mark {
-                let (name, since, reason) = status_columns(status);
-                mark.execute(params![id.0, name, since, reason])?;
+                mark_one(id.0, status)?;
+            }
+            for (track, status) in &changes.insert_unreadable {
+                insert_tracks(&tx, std::slice::from_ref(track))?;
+                mark_one(tx.last_insert_rowid(), status)?;
+            }
+        }
+        {
+            let mut restamp =
+                tx.prepare("UPDATE tracks SET size = ?2, modified_ms = ?3 WHERE id = ?1")?;
+            for (id, stamp) in &changes.restamp {
+                restamp.execute(params![id.0, size_column(stamp.size), stamp.modified_ms])?;
             }
         }
         tx.commit()
@@ -216,8 +245,8 @@ impl Index {
         self.conn
             .query_row(
                 &format!(
-                    "SELECT id, status, status_since_ms, status_reason, {FILE_COLUMNS} \
-                     FROM tracks WHERE {condition}"
+                    "SELECT id, status, status_since_ms, status_reason, status_kind, \
+                     {FILE_COLUMNS} FROM tracks WHERE {condition}"
                 ),
                 [value],
                 indexed_from_row,
@@ -228,7 +257,7 @@ impl Index {
     /// Every indexed track, by path.
     pub fn tracks(&self) -> rusqlite::Result<Vec<IndexedTrack>> {
         let mut stmt = self.conn.prepare(&format!(
-            "SELECT id, status, status_since_ms, status_reason, {FILE_COLUMNS} \
+            "SELECT id, status, status_since_ms, status_reason, status_kind, {FILE_COLUMNS} \
              FROM tracks ORDER BY path"
         ))?;
         stmt.query_map([], indexed_from_row)?.collect()
@@ -259,7 +288,7 @@ fn update_tracks(tx: &Transaction<'_>, updates: &[(TrackId, Track)]) -> rusqlite
         "UPDATE tracks SET path = ?1, size = ?2, modified_ms = ?3, format = ?4, title = ?5, \
          artist = ?6, album_artist = ?7, album = ?8, track_number = ?9, disc_number = ?10, \
          year = ?11, genre = ?12, duration_ms = ?13, bitrate_kbps = ?14, has_cover = ?15, \
-         status = 'present', status_since_ms = NULL, status_reason = NULL \
+         status = 'present', status_since_ms = NULL, status_reason = NULL, status_kind = NULL \
          WHERE id = ?16",
     )?;
     for (id, t) in updates {
@@ -297,18 +326,41 @@ fn size_column(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
-fn status_columns(status: &TrackStatus) -> (&'static str, Option<i64>, Option<&str>) {
+/// The columns `status`, `status_since_ms`, `status_reason`, `status_kind`.
+fn status_columns(
+    status: &TrackStatus,
+) -> (
+    &'static str,
+    Option<i64>,
+    Option<&str>,
+    Option<&'static str>,
+) {
     match status {
-        TrackStatus::Present => ("present", None, None),
-        TrackStatus::Unreadable { since_ms, reason } => {
-            ("unreadable", Some(*since_ms), Some(reason.as_str()))
-        }
-        TrackStatus::Missing { since_ms } => ("missing", Some(*since_ms), None),
+        TrackStatus::Present => ("present", None, None, None),
+        TrackStatus::Unreadable {
+            since_ms,
+            reason,
+            kind,
+        } => (
+            "unreadable",
+            Some(*since_ms),
+            Some(reason.as_str()),
+            Some(kind_name(*kind)),
+        ),
+        TrackStatus::Missing { since_ms } => ("missing", Some(*since_ms), None, None),
     }
 }
 
-/// The status stored in columns `first` (name), `first + 1` (since) and
-/// `first + 2` (reason).
+fn kind_name(kind: ReadErrorKind) -> &'static str {
+    match kind {
+        ReadErrorKind::Access => "access",
+        ReadErrorKind::Content => "content",
+        ReadErrorKind::Panic => "panic",
+    }
+}
+
+/// The status stored in columns `first` (name), `first + 1` (since),
+/// `first + 2` (reason) and `first + 3` (kind).
 fn status_from_row(r: &Row<'_>, first: usize) -> rusqlite::Result<TrackStatus> {
     let name: String = r.get(first)?;
     let since: Option<i64> = r.get(first + 1)?;
@@ -316,6 +368,11 @@ fn status_from_row(r: &Row<'_>, first: usize) -> rusqlite::Result<TrackStatus> {
         "unreadable" => TrackStatus::Unreadable {
             since_ms: since.unwrap_or(0),
             reason: r.get::<_, Option<String>>(first + 2)?.unwrap_or_default(),
+            kind: match r.get::<_, Option<String>>(first + 3)?.as_deref() {
+                Some("content") => ReadErrorKind::Content,
+                Some("panic") => ReadErrorKind::Panic,
+                _ => ReadErrorKind::Access,
+            },
         },
         "missing" => TrackStatus::Missing {
             since_ms: since.unwrap_or(0),
@@ -324,9 +381,10 @@ fn status_from_row(r: &Row<'_>, first: usize) -> rusqlite::Result<TrackStatus> {
     })
 }
 
-/// A row of `id, status, status_since_ms, status_reason, FILE_COLUMNS`.
+/// A row of `id, status, status_since_ms, status_reason, status_kind,
+/// FILE_COLUMNS`.
 fn indexed_from_row(r: &Row<'_>) -> rusqlite::Result<IndexedTrack> {
-    const FILE: usize = 4;
+    const FILE: usize = 5;
     Ok(IndexedTrack {
         id: TrackId(r.get(0)?),
         status: status_from_row(r, 1)?,
@@ -451,6 +509,7 @@ mod tests {
         let locked = TrackStatus::Unreadable {
             since_ms: 1_800_000_000_000,
             reason: "used by another process".to_owned(),
+            kind: ReadErrorKind::Access,
         };
         let gone = TrackStatus::Missing {
             since_ms: 1_800_000_000_000,
@@ -475,6 +534,42 @@ mod tests {
             index.track(a).unwrap().unwrap().status,
             TrackStatus::Present
         );
+    }
+
+    #[test]
+    fn a_new_damaged_file_is_indexed_with_its_status_and_restamped() {
+        let mut index = Index::open_in_memory().unwrap();
+        let damaged = TrackStatus::Unreadable {
+            since_ms: 1_800_000_000_000,
+            reason: "failed to parse Mpeg file".to_owned(),
+            kind: ReadErrorKind::Content,
+        };
+        let bare = Track::bare(r"C:\Music\broken.mp3".to_owned(), sample("x").stamp);
+        index
+            .apply(&Changes {
+                insert_unreadable: vec![(bare.clone(), damaged.clone())],
+                ..Changes::default()
+            })
+            .unwrap();
+        let stored = index.track_by_path(&bare.path).unwrap().unwrap();
+        assert_eq!(stored.status, damaged);
+        assert_eq!(stored.track.format, "MP3");
+        assert_eq!(stored.track.title, None);
+
+        let changed = FileStamp {
+            size: 99,
+            modified_ms: 1_900_000_000_000,
+        };
+        index
+            .apply(&Changes {
+                restamp: vec![(stored.id, changed)],
+                ..Changes::default()
+            })
+            .unwrap();
+        let stored = index.track(stored.id).unwrap().unwrap();
+        assert_eq!(stored.track.stamp, changed);
+        assert_eq!(stored.status, damaged, "the status stays");
+        assert!(Changes::default().is_empty());
     }
 
     #[test]

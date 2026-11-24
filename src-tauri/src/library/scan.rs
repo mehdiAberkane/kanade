@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 use super::index::{Candidate, Changes, Index, Known, TrackId, TrackStatus};
-use super::track::{FileStamp, Track, is_audio_file, read_track};
+use super::track::{FileStamp, ReadError, ReadErrorKind, Track, is_audio_file, read_track};
 use crate::store::{self, StoreError};
 
 /// Changes written to the index per transaction, so a long first scan saves
@@ -23,6 +23,10 @@ const BATCH_SIZE: usize = 500;
 /// a sync finish (chosen on 24/11/2026).
 pub const KEEP_GONE_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 
+/// Errors kept in a report: a folder of thousands of broken files would
+/// otherwise fill the memory and the screen. The others are only counted.
+pub const MAX_ERRORS_KEPT: usize = 1000;
+
 /// What a scan did.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ScanReport {
@@ -31,15 +35,30 @@ pub struct ScanReport {
     pub updated: usize,
     /// Files found at a new path, recognised as an indexed track.
     pub moved: usize,
+    /// Files not read again: unchanged, or damaged and unchanged.
     pub unchanged: usize,
-    /// Tracks whose file became unreadable; kept with their last tags.
+    /// Files that could not be read this time. A damaged one is indexed as
+    /// unreadable and not read again until it changes; a locked one is
+    /// tried again at the next scan.
     pub unreadable: usize,
     /// Tracks whose file disappeared; kept for `KEEP_GONE_MS`.
     pub missing: usize,
     /// Tracks that left the index, missing or unreadable for too long.
     pub removed: usize,
-    /// Files or folders that could not be read.
+    /// Files or folders that could not be read, the first `MAX_ERRORS_KEPT`.
     pub errors: Vec<ScanError>,
+    /// Errors beyond `MAX_ERRORS_KEPT`, counted only.
+    pub errors_omitted: usize,
+}
+
+impl ScanReport {
+    fn error(&mut self, path: String, message: String) {
+        if self.errors.len() < MAX_ERRORS_KEPT {
+            self.errors.push(ScanError { path, message });
+        } else {
+            self.errors_omitted += 1;
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -140,12 +159,11 @@ pub fn scan_folder_at(
                 if let Some(path) = e.path() {
                     scan.unreadable_dirs.push(path.to_path_buf());
                 }
-                scan.report.errors.push(ScanError {
-                    path: e
-                        .path()
+                scan.report.error(
+                    e.path()
                         .map_or_else(String::new, |p| p.display().to_string()),
-                    message: e.to_string(),
-                });
+                    e.to_string(),
+                );
             }
         }
         if scan.changes.len() >= BATCH_SIZE {
@@ -174,10 +192,10 @@ struct Scan {
 impl Scan {
     fn file(&mut self, index: &Index, entry: &walkdir::DirEntry) -> Result<(), LibraryError> {
         let Some(path) = entry.path().to_str().map(str::to_owned) else {
-            self.report.errors.push(ScanError {
-                path: entry.path().display().to_string(),
-                message: "path is not valid UTF-8".to_owned(),
-            });
+            self.report.error(
+                entry.path().display().to_string(),
+                "path is not valid UTF-8".to_owned(),
+            );
             return Ok(());
         };
         self.seen.insert(path.clone());
@@ -187,19 +205,16 @@ impl Scan {
             Ok(m) => FileStamp::of(&m),
             Err(e) => {
                 if let Some(known) = known {
-                    self.unreadable(&known, e.to_string());
+                    self.unreadable(&known, &ReadError::access(e.to_string()), None);
                 }
-                self.report.errors.push(ScanError {
-                    path,
-                    message: e.to_string(),
-                });
+                self.report.error(path, e.to_string());
                 return Ok(());
             }
         };
 
         if let Some(known) = &known
             && known.stamp == stamp
-            && known.status == TrackStatus::Present
+            && !retry(&known.status)
         {
             self.report.unchanged += 1;
             return Ok(());
@@ -217,31 +232,57 @@ impl Scan {
                     self.maybe_moved.push(track);
                 }
             }
-            (Err(message), known) => {
-                if let Some(known) = known {
-                    self.unreadable(&known, message.clone());
+            (Err(error), Some(known)) => {
+                self.unreadable(&known, &error, Some(stamp));
+                self.report.error(path, error.message);
+            }
+            (Err(error), None) => {
+                // A new damaged file is indexed, so that the next scans do
+                // not read it again; a new locked one is simply tried again.
+                if !error.kind.retry() {
+                    self.changes.insert_unreadable.push((
+                        Track::bare(path.clone(), stamp),
+                        self.unreadable_status(&error),
+                    ));
                 }
-                self.report.errors.push(ScanError { path, message });
+                self.report.unreadable += 1;
+                self.report.error(path, error.message);
             }
         }
         Ok(())
     }
 
-    /// An indexed file that could not be read: kept with its last tags.
-    fn unreadable(&mut self, known: &Known, reason: String) {
-        match &known.status {
-            TrackStatus::Unreadable { since_ms, .. } => self.expire(known.id, *since_ms),
-            _ => {
-                self.changes.mark.push((
-                    known.id,
-                    TrackStatus::Unreadable {
-                        since_ms: self.now_ms,
-                        reason,
-                    },
-                ));
-                self.report.unreadable += 1;
-            }
+    fn unreadable_status(&self, error: &ReadError) -> TrackStatus {
+        TrackStatus::Unreadable {
+            since_ms: self.now_ms,
+            reason: error.message.clone(),
+            kind: error.kind,
         }
+    }
+
+    /// An indexed file that could not be read: kept with its last tags. A
+    /// damaged one takes its new stamp, so it is not read again until it
+    /// changes; one still locked leaves after `KEEP_GONE_MS`.
+    fn unreadable(&mut self, known: &Known, error: &ReadError, stamp: Option<FileStamp>) {
+        if let TrackStatus::Unreadable {
+            since_ms,
+            kind: ReadErrorKind::Access,
+            ..
+        } = known.status
+            && error.kind == ReadErrorKind::Access
+        {
+            self.expire(known.id, since_ms);
+            return;
+        }
+        self.changes
+            .mark
+            .push((known.id, self.unreadable_status(error)));
+        if let Some(stamp) = stamp
+            && !error.kind.retry()
+        {
+            self.changes.restamp.push((known.id, stamp));
+        }
+        self.report.unreadable += 1;
     }
 
     /// Removes a track marked since `since_ms` once that is too long ago.
@@ -305,6 +346,16 @@ impl Scan {
     }
 }
 
+/// Whether an unchanged file is read again: a track gone and back (missing),
+/// or one that was locked. A present one, or a damaged one, is not.
+fn retry(status: &TrackStatus) -> bool {
+    match status {
+        TrackStatus::Present => false,
+        TrackStatus::Unreadable { kind, .. } => kind.retry(),
+        TrackStatus::Missing { .. } => true,
+    }
+}
+
 /// Whether a track's file is gone: not found by this scan under `root`, or,
 /// elsewhere (another library, the old letter of a drive), already marked
 /// missing or no longer on the disk.
@@ -345,6 +396,12 @@ mod tests {
         dir
     }
 
+    /// Tracks in the index after a scan of `library()`: the listed files,
+    /// and broken.mp3 as unreadable.
+    fn indexed() -> u64 {
+        listed() as u64 + 1
+    }
+
     /// Tagged fixtures, the untagged FLAC and the WMA file.
     fn listed() -> usize {
         FIXTURES.len() + 2
@@ -383,7 +440,17 @@ mod tests {
         );
         assert_eq!(report.errors.len(), 1, "{:?}", report.errors);
         assert!(report.errors[0].path.ends_with("broken.mp3"));
-        assert_eq!(index.count().unwrap(), listed() as u64);
+        // The damaged file is indexed too, as unreadable.
+        assert_eq!(report.unreadable, 1);
+        assert_eq!(index.count().unwrap(), indexed());
+        let broken = id_of(&index, &dir.path().join("broken.mp3"));
+        assert!(matches!(
+            status_of(&index, broken),
+            TrackStatus::Unreadable {
+                kind: ReadErrorKind::Content,
+                ..
+            }
+        ));
 
         let mp3 = index
             .track_by_path(dir.path().join("tone.mp3").to_str().unwrap())
@@ -399,8 +466,10 @@ mod tests {
         let mut index = Index::open_in_memory().unwrap();
         scan(&mut index, dir.path());
         let report = scan(&mut index, dir.path());
-        assert_eq!(report.unchanged, listed());
+        // broken.mp3 included: a damaged file is not read again either.
+        assert_eq!(report.unchanged, listed() + 1);
         assert_eq!((report.added, report.updated, report.missing), (0, 0, 0));
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
     }
 
     #[test]
@@ -413,7 +482,8 @@ mod tests {
         tagged_copy("tone.ogg", &path, "A much longer title than the first one");
         let report = scan(&mut index, dir.path());
         assert_eq!(report.updated, 1);
-        assert_eq!(report.unchanged, listed() - 1);
+        // The others, broken.mp3 included, are not read again.
+        assert_eq!(report.unchanged, listed());
         let track = index.track(id).unwrap().unwrap();
         assert_eq!(
             track.track.title.as_deref(),
@@ -434,7 +504,7 @@ mod tests {
         assert_eq!((report.moved, report.added, report.missing), (1, 0, 0));
         assert_eq!(id_of(&index, &renamed), id);
         assert_eq!(status_of(&index, id), TrackStatus::Present);
-        assert_eq!(index.count().unwrap(), listed() as u64);
+        assert_eq!(index.count().unwrap(), indexed());
     }
 
     #[test]
@@ -457,10 +527,12 @@ mod tests {
         let old_root = library();
         let mut index = Index::open_in_memory().unwrap();
         scan(&mut index, old_root.path());
+        // The readable tracks: a damaged file is not followed (KAN-41).
         let before: Vec<(String, TrackId)> = index
             .tracks()
             .unwrap()
             .into_iter()
+            .filter(|t| t.status == TrackStatus::Present)
             .map(|t| (t.track.path, t.id))
             .collect();
 
@@ -483,7 +555,8 @@ mod tests {
 
         let report = scan(&mut index, new_root.path());
         assert_eq!((report.moved, report.added), (listed(), 0));
-        assert_eq!(index.count().unwrap(), listed() as u64);
+        // Plus the old broken.mp3, missing, and the new one, unreadable.
+        assert_eq!(index.count().unwrap(), indexed() + 1);
         for (path, id) in before {
             let relative = Path::new(&path).strip_prefix(&old_path).unwrap();
             assert_eq!(id_of(&index, &new_root.path().join(relative)), id, "{path}");
@@ -542,14 +615,14 @@ mod tests {
             status_of(&index, id),
             TrackStatus::Missing { since_ms: NOW }
         );
-        assert_eq!(index.count().unwrap(), listed() as u64);
+        assert_eq!(index.count().unwrap(), indexed());
 
         let report = scan_folder_at(&mut index, dir.path(), NOW + 30 * DAY).unwrap();
         assert_eq!((report.missing, report.removed), (0, 0), "30 days: kept");
         let report = scan_folder_at(&mut index, dir.path(), NOW + 31 * DAY).unwrap();
         assert_eq!(report.removed, 1);
         assert!(index.track(id).unwrap().is_none());
-        assert_eq!(index.count().unwrap(), listed() as u64 - 1);
+        assert_eq!(index.count().unwrap(), indexed() - 1);
     }
 
     #[test]
@@ -607,14 +680,125 @@ mod tests {
     }
 
     #[test]
-    fn a_file_unreadable_for_more_than_30_days_leaves() {
+    fn a_damaged_file_stays_marked_and_is_not_read_again_until_it_changes() {
         let dir = library();
         let mut index = Index::open_in_memory().unwrap();
         scan(&mut index, dir.path());
         let path = dir.path().join("tone.m4a");
         let id = id_of(&index, &path);
         fs::write(&path, b"damaged for good").unwrap();
+        assert_eq!(scan(&mut index, dir.path()).unreadable, 1);
+
+        // Months later, unchanged: not read, not removed, no new error.
+        let report = scan_folder_at(&mut index, dir.path(), NOW + 90 * DAY).unwrap();
+        assert_eq!((report.unreadable, report.removed), (0, 0));
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+        let track = index.track(id).unwrap().unwrap();
+        assert_eq!(track.track.title.as_deref(), Some("Title of tone.m4a"));
+        assert!(matches!(
+            track.status,
+            TrackStatus::Unreadable {
+                kind: ReadErrorKind::Content,
+                ..
+            }
+        ));
+
+        // Changed again (still damaged): read once more.
+        fs::write(&path, b"damaged differently, and longer").unwrap();
+        assert_eq!(scan(&mut index, dir.path()).unreadable, 1);
+    }
+
+    #[test]
+    fn damaged_and_hostile_files_never_stop_a_scan_and_are_read_once() {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, _) in FIXTURES {
+            let bytes = fs::read(fixture(name)).unwrap();
+            let (stem, ext) = name.split_once('.').unwrap();
+            for cut in [0, 7, bytes.len() / 3, bytes.len() - 5] {
+                fs::write(
+                    dir.path().join(format!("{stem}-{cut}.{ext}")),
+                    &bytes[..cut],
+                )
+                .unwrap();
+            }
+            let mut flipped = bytes;
+            for at in (0..flipped.len()).step_by(97) {
+                flipped[at] ^= 0xA5;
+            }
+            fs::write(dir.path().join(format!("{stem}-flipped.{ext}")), flipped).unwrap();
+        }
+        let files = FIXTURES.len() * 5;
+
+        let mut index = Index::open_in_memory().unwrap();
+        let report = scan(&mut index, dir.path());
+        // Each file is either read (lofty makes the best of it) or indexed
+        // as unreadable, with its error.
+        assert_eq!(report.added + report.unreadable, files, "{report:?}");
+        assert_eq!(report.errors.len(), report.unreadable);
+        assert_eq!(index.count().unwrap(), files as u64);
+        let panics: Vec<_> = index
+            .tracks()
+            .unwrap()
+            .into_iter()
+            .filter(|t| {
+                matches!(
+                    t.status,
+                    TrackStatus::Unreadable {
+                        kind: ReadErrorKind::Panic,
+                        ..
+                    }
+                )
+            })
+            .collect();
+        assert!(panics.is_empty(), "lofty panicked (report it): {panics:#?}");
+
+        let report = scan(&mut index, dir.path());
+        assert_eq!(report.unchanged, files);
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+    }
+
+    #[test]
+    fn a_report_keeps_the_first_1000_errors_and_counts_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..MAX_ERRORS_KEPT + 5 {
+            fs::write(dir.path().join(format!("broken-{i}.mp3")), b"not audio").unwrap();
+        }
+        let mut index = Index::open_in_memory().unwrap();
+        let report = scan(&mut index, dir.path());
+        assert_eq!(report.errors.len(), MAX_ERRORS_KEPT);
+        assert_eq!(report.errors_omitted, 5);
+        assert_eq!(report.unreadable, MAX_ERRORS_KEPT + 5);
+    }
+
+    /// A file another program holds open without sharing it, as a tag editor
+    /// A file locked for more than 30 days leaves, like a missing one.
+    #[cfg(windows)]
+    #[test]
+    fn a_file_locked_for_more_than_30_days_leaves() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let dir = library();
+        let mut index = Index::open_in_memory().unwrap();
         scan(&mut index, dir.path());
+        let path = dir.path().join("tone.ogg");
+        let id = id_of(&index, &path);
+        tagged_copy("tone.ogg", &path, "Retagged");
+        let _lock = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&path)
+            .unwrap();
+
+        scan(&mut index, dir.path());
+        assert!(matches!(
+            status_of(&index, id),
+            TrackStatus::Unreadable {
+                kind: ReadErrorKind::Access,
+                ..
+            }
+        ));
+        let report = scan_folder_at(&mut index, dir.path(), NOW + 30 * DAY).unwrap();
+        assert_eq!(report.removed, 0, "30 days: kept");
         let report = scan_folder_at(&mut index, dir.path(), NOW + 31 * DAY).unwrap();
         assert_eq!(report.removed, 1);
         assert!(index.track(id).unwrap().is_none());
@@ -663,13 +847,13 @@ mod tests {
         let gone = dir.path().join("Unplugged drive");
         let err = scan_folder_at(&mut index, &gone, NOW).unwrap_err();
         assert!(matches!(err, LibraryError::RootUnavailable { .. }));
-        assert_eq!(index.count().unwrap(), listed() as u64);
+        assert_eq!(index.count().unwrap(), indexed());
         assert!(
             index
                 .tracks()
                 .unwrap()
                 .iter()
-                .all(|t| t.status == TrackStatus::Present)
+                .all(|t| !matches!(t.status, TrackStatus::Missing { .. }))
         );
     }
 

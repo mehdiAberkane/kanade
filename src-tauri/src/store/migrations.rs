@@ -13,7 +13,7 @@ use rusqlite::Connection;
 use super::{StoreError, user_version};
 
 /// The version the steps below lead to.
-pub const LATEST_VERSION: i32 = 2;
+pub const LATEST_VERSION: i32 = 3;
 
 struct Migration {
     version: i32,
@@ -79,6 +79,16 @@ SELECT path, size, modified_ms, format, title, artist, album_artist, album,
 FROM tracks_v1 ORDER BY path;
 DROP TABLE tracks_v1;
 CREATE INDEX tracks_by_size ON tracks (size);",
+    },
+    // KAN-24: why an unreadable file could not be read. 'access' (locked):
+    // tried again at each scan; 'content' or 'panic' (damaged): only once
+    // the file changes. The unreadable tracks of before were all retried.
+    Migration {
+        version: 3,
+        sql: "
+ALTER TABLE tracks ADD COLUMN status_kind TEXT
+    CHECK (status_kind IN ('access', 'content', 'panic'));
+UPDATE tracks SET status_kind = 'access' WHERE status = 'unreadable';",
     },
 ];
 
@@ -152,6 +162,35 @@ mod tests {
             [
                 (1, r"C:\Music\a.mp3".into(), "A".into(), "present".into()),
                 (2, r"C:\Music\b.flac".into(), "B".into(), "present".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn step_3_keeps_retrying_the_tracks_unreadable_before_it() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate_to(&mut conn, 2).unwrap();
+        conn.execute_batch(
+            "INSERT INTO tracks (path, size, modified_ms, format, has_cover, status, \
+                                 status_since_ms, status_reason)
+             VALUES ('a.flac', 1, 1, 'FLAC', 0, 'unreadable', 5, 'locked'),
+                    ('b.flac', 1, 1, 'FLAC', 0, 'present', NULL, NULL);",
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+        let kinds: Vec<(String, Option<String>)> = conn
+            .prepare("SELECT path, status_kind FROM tracks ORDER BY path")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            kinds,
+            [
+                ("a.flac".into(), Some("access".into())),
+                ("b.flac".into(), None)
             ]
         );
     }

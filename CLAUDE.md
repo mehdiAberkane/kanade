@@ -21,7 +21,7 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
 - Installer : `npm install`
 - Tests : `npm test`, puis `cargo test --locked` dans `src-tauri`
 - Couverture, comme la CI : `npm run test:coverage` (seuils dans `vitest.config.ts`),
-  puis dans `src-tauri` : `cargo llvm-cov --locked --fail-under-lines 92` (seuil dans
+  puis dans `src-tauri` : `cargo llvm-cov --locked --fail-under-lines 93` (seuil dans
   `ci.yml`). Les seuils sont posés juste sous le niveau atteint : monte-les quand des
   tests s'ajoutent, ne les baisse jamais. Installer l'outil :
   `rustup component add llvm-tools-preview` puis
@@ -127,6 +127,15 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
     part, pas dans `kanade.db`.
 - Pas de code `unsafe` dans Kanade : `#![forbid(unsafe_code)]` en tête de `lib.rs` et
   `main.rs`. Il ne se contourne pas avec un `allow`.
+- Fichiers audio abîmés ou hostiles (`library/track.rs`) : la lecture d'un fichier ne fait
+  jamais tomber Kanade. Une panique de lofty est rattrapée : **pas de `panic = "abort"`**
+  dans le profil de publication. lofty est limité à 16 Mo par élément de tag (au-delà, les
+  pochettes sont sautées), une valeur de tag est coupée à 1 024 caractères, un fichier de
+  plus de 4 Go n'est pas lu. Une erreur est classée « access » (fichier verrouillé : relu à
+  chaque scan) ou « content »/« panic » (abîmé : indexé illisible, relu seulement quand il
+  change). Fuzzing : `KANADE_FUZZ_ITERATIONS=20000 cargo test --release --lib fuzzed`
+  dans `src-tauri` ; la CI le lance chaque semaine (`fuzz.yml`). Une panique trouvée se
+  signale à lofty, et le fichier en cause devient un test.
 - Icône : la source est `app-icon.svg`. Pour la changer, `npm run tauri icon app-icon.svg`,
   puis supprimer `src-tauri/icons/android` et `src-tauri/icons/ios` (app Windows seulement).
   Cargo ne voit pas le changement d'icône : `cargo clean -p kanade` dans `src-tauri` avant

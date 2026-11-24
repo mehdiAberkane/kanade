@@ -36,7 +36,8 @@ tauri-plugin-process = "2.4.0"
 codegen-units = 1
 lto = true
 opt-level = 3
-panic = "abort"
+# No panic = "abort": a panic in lofty on a hostile audio file must be
+# caught (library/track.rs), not close Kanade at every scan.
 strip = true
 
 [dev-dependencies]
