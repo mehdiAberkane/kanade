@@ -58,6 +58,11 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   Hors de Tauri, en dev seulement, `src/dev/mockBackend.ts` répond aux commandes Rust
   (`mockIPC`) : **chaque nouvelle commande Rust y ajoute sa réponse simulée**, avec des
   données d'exemple réalistes.
+- Chaque écran a aussi ses **tests de composants** (Testing Library dans jsdom, voir
+  `src/App.test.tsx`) : ils rendent l'interface, cliquent comme un utilisateur et
+  répondent aux commandes Rust avec ce même faux backend. Un fichier de test de
+  composant commence par `// @vitest-environment jsdom` ; il importe l'app après
+  `vi.resetModules()` pour repartir d'un état neuf à chaque test.
 - La logique Rust se vérifie par `cargo test`, sur des fichiers d'exemple :
   `src-tauri/tests/fixtures` (un son d'une seconde par format, sans tags ; les tests y
   écrivent les tags avec lofty). Son README dit comment les régénérer avec VLC.
