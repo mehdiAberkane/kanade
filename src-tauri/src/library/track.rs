@@ -239,8 +239,9 @@ struct ParseFailure {
 /// One lofty read, with its panics caught.
 fn parse(path: &Path, read_covers: bool) -> Result<TaggedFile, ParseFailure> {
     // Opening is where a locked file or a lost share fails: an access
-    // problem. Past it, what goes wrong is in the file.
-    let file = fs::File::open(path).map_err(|e| ParseFailure {
+    // problem. Past it, what goes wrong is in the file. The \\?\ form
+    // reaches long paths and names such as "NUL.mp3" or "song. ".
+    let file = fs::File::open(super::paths::for_io(path)).map_err(|e| ParseFailure {
         error: ReadError::access(e.to_string()),
         allocation: false,
     })?;

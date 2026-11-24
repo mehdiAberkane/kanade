@@ -2,6 +2,7 @@
 //! local SQLite index, so the app does not re-read every file at each launch.
 
 pub mod index;
+pub mod paths;
 pub mod scan;
 pub mod track;
 
