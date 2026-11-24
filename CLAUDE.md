@@ -60,9 +60,15 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   jours) ; la commande pour les télécharger est dans le README. Ce job ne tourne pas sur
   les PR et n'est pas exigé.
 - Publier une version : `npm run release` (ou `minor`, `major`, `x.y.z`) depuis `main` à
-  jour, **seulement quand je le demande**. Le tag lance `release.yml`, qui vérifie,
-  construit et signe l'installeur MSI, puis publie la Release que l'app propose
-  d'installer. Clé de signature : `docs/cle-de-signature.md`.
+  jour. Le tag lance `release.yml`, qui vérifie, construit et signe l'installeur MSI,
+  puis publie la Release que l'app propose d'installer. Clé de signature :
+  `docs/cle-de-signature.md`. Quand publier :
+  - **Une fois tous les tickets de « À faire » terminés** (colonne vide, tout fusionné et
+    en « A verifier »), publie une nouvelle version sans attendre que je la demande :
+    `npm run release minor` si la série apporte une fonctionnalité, `npm run release`
+    sinon. Attends que la Release soit en ligne, puis dis-moi le numéro et ce qu'elle
+    contient.
+  - Sinon, seulement quand je le demande.
 
 ## Vérifier sans prendre la main sur le PC
 
