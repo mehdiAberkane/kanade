@@ -1,6 +1,6 @@
 [package]
 name = "kanade"
-version = "0.2.0"
+version = "0.3.0"
 description = "Kanade - music library manager for Windows"
 authors = ["devsecops-force"]
 edition = "2024"
