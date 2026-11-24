@@ -231,11 +231,14 @@ describe("Settings › Mises à jour", () => {
     await user.click(await screen.findByRole("button", { name: /^Installer la version/ }));
     await user.click(screen.getByRole("button", { name: "Installer et redémarrer" }));
     expect(await screen.findAllByText("Sauvegarde des données…")).not.toHaveLength(0);
-    const focused = document.activeElement;
+    // The button clicked is now disabled: the browser may move the focus
+    // from it to the page at any time. Either way, Tab goes nowhere else.
+    const confirm = screen.getByRole("button", { name: "Installer et redémarrer" });
     await user.keyboard("{Escape}");
     await user.tab();
+    await user.tab({ shift: true });
     expect(screen.getByRole("dialog")).toBeTruthy();
-    expect(document.activeElement).toBe(focused);
+    expect([confirm, document.body]).toContain(document.activeElement);
   });
 
   it("shows a placeholder for the installed version in the update window too", async () => {
