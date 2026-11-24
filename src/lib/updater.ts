@@ -1,6 +1,7 @@
 // In-app updates: Kanade asks GitHub Releases, through Tauri's updater plugin
 // (configured in src-tauri/tauri.conf.json, plugins.updater), whether a newer
-// signed version exists, then downloads and installs it on demand.
+// signed version exists. Once the user has read its notes and agreed, it
+// copies the database, then downloads and installs the new version.
 // The logic is a small store whose sources are passed in, so it is tested
 // without Tauri; useUpdater.ts plugs in the real plugin.
 import type { DownloadEvent } from "@tauri-apps/plugin-updater";
@@ -8,6 +9,8 @@ import type { DownloadEvent } from "@tauri-apps/plugin-updater";
 /** A newer version found on GitHub (the plugin's Update has this shape). */
 export interface FoundUpdate {
   version: string;
+  /** latest.json's notes: one merged pull request per line (release.yml). */
+  body?: string;
   downloadAndInstall: (onEvent?: (event: DownloadEvent) => void) => Promise<void>;
 }
 
@@ -16,6 +19,10 @@ export interface UpdateSource {
   check: () => Promise<FoundUpdate | null>;
   /** Restarts Kanade once the new version is installed. */
   relaunch: () => Promise<void>;
+  /** Copies the user's data first: the new version may change the database. */
+  backup: () => Promise<void>;
+  /** Whether the automatic checks are on (Réglages › Mises à jour). */
+  automatic: () => Promise<boolean>;
 }
 
 export type UpdateStatus =
@@ -23,6 +30,8 @@ export type UpdateStatus =
   | { kind: "checking" }
   | { kind: "upToDate" }
   | { kind: "checkFailed"; message: string }
+  | { kind: "backingUp" }
+  | { kind: "backupFailed"; message: string }
   /** progress: share downloaded, from 0 to 1; null while the size is unknown. */
   | { kind: "installing"; progress: number | null }
   | { kind: "installFailed"; message: string };
@@ -30,13 +39,15 @@ export type UpdateStatus =
 export interface UpdaterState {
   /** Version found on GitHub, newer than the installed one. */
   available: string | null;
+  /** What that version brings, a line per change (releaseNotes). */
+  notes: string[];
   status: UpdateStatus;
 }
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export function createUpdater(source: UpdateSource) {
-  let state: UpdaterState = { available: null, status: { kind: "idle" } };
+  let state: UpdaterState = { available: null, notes: [], status: { kind: "idle" } };
   let found: FoundUpdate | null = null;
   const listeners = new Set<() => void>();
 
@@ -44,12 +55,15 @@ export function createUpdater(source: UpdateSource) {
     state = { ...state, ...change };
     for (const listener of listeners) listener();
   };
-  const busy = () => state.status.kind === "checking" || state.status.kind === "installing";
+  const busy = () =>
+    state.status.kind === "checking" ||
+    state.status.kind === "backingUp" ||
+    state.status.kind === "installing";
 
   const lookup = async () => {
     found = await source.check();
     const available = found?.version ?? null;
-    if (available !== state.available) set({ available });
+    if (available !== state.available) set({ available, notes: releaseNotes(found?.body) });
     return found;
   };
 
@@ -65,9 +79,14 @@ export function createUpdater(source: UpdateSource) {
       };
     },
 
-    /** The automatic check: silent when it fails, the next one will try again. */
+    /**
+     * The automatic check, unless the settings turn it off (when they cannot
+     * be read, it runs): silent when it fails, the next one will try again.
+     */
     checkInBackground: async () => {
       if (busy()) return;
+      const on = await source.automatic().catch(() => true);
+      if (!on || busy()) return;
       try {
         await lookup();
       } catch {
@@ -87,10 +106,20 @@ export function createUpdater(source: UpdateSource) {
       }
     },
 
-    /** Downloads and installs the version found, then restarts Kanade. */
+    /**
+     * Copies the database, then downloads and installs the version found and
+     * restarts Kanade. Nothing is downloaded when the copy fails.
+     */
     install: async () => {
       const update = found;
       if (!update || busy()) return;
+      set({ status: { kind: "backingUp" } });
+      try {
+        await source.backup();
+      } catch (e) {
+        set({ status: { kind: "backupFailed", message: errorText(e) } });
+        return;
+      }
       let total = 0;
       let done = 0;
       let shown = -1;
@@ -134,6 +163,14 @@ export function statusLine(
       return null;
     case "upToDate":
       return { text: "✓ Kanade est à jour", tone: "ok" };
+    case "backingUp":
+      return { text: "Sauvegarde des données…", tone: "info" };
+    case "backupFailed":
+      return {
+        text: "⚠ Sauvegarde des données impossible : rien n'a été installé.",
+        tone: "error",
+        detail: status.message,
+      };
     case "checkFailed":
       return {
         text: `⚠ ${checkFailureText(status.message)}`,
@@ -162,4 +199,20 @@ export function checkFailureText(message: string): string {
   if (/valid release JSON/i.test(message))
     return "Aucune version publiée sur GitHub pour l'instant.";
   return "Impossible de joindre GitHub, réessaie plus tard.";
+}
+
+/**
+ * The release notes as lines: one merged pull request each, without the list
+ * marks, nor the pull request numbers that only GitHub links.
+ */
+export function releaseNotes(body: string | undefined): string[] {
+  return (body ?? "")
+    .split("\n")
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^[-*]\s+/, "")
+        .replace(/\s*\(#\d+\)$/, ""),
+    )
+    .filter((line) => line !== "");
 }

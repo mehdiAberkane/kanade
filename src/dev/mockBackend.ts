@@ -15,6 +15,11 @@ import {
 
 export const MOCK_VERSION = "0.0.0-dev";
 export const MOCK_NEXT_VERSION = "0.0.1-dev";
+/** The notes of the fake update, as release.yml writes them. */
+const MOCK_NOTES = [
+  "- KAN-38: show the notes of an update and back up the data before it installs (#20)",
+  "- KAN-3: the list of tracks (#19)",
+].join("\n");
 
 /**
  * What the fake update check answers, chosen in the address:
@@ -108,7 +113,13 @@ export function handleMockCommand(
     case "plugin:updater|check":
       switch (scenarios.update ?? "none") {
         case "available":
-          return { rid: 1, currentVersion: MOCK_VERSION, version: MOCK_NEXT_VERSION, rawJson: {} };
+          return {
+            rid: 1,
+            currentVersion: MOCK_VERSION,
+            version: MOCK_NEXT_VERSION,
+            body: MOCK_NOTES,
+            rawJson: {},
+          };
         case "offline":
           // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
           return Promise.reject(

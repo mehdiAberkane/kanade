@@ -5,6 +5,7 @@ import { DropZone } from "./components/DropZone";
 import { LibrariesPage } from "./components/LibrariesPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { TracksPage } from "./components/TracksPage";
+import { UpdateDialog } from "./components/UpdateDialog";
 import { statusLine } from "./lib/updater";
 import { useBackgroundUpdateCheck, useUpdater } from "./lib/useUpdater";
 import "./App.css";
@@ -14,6 +15,11 @@ type Page = "tracks" | "libraries" | "settings";
 function App() {
   const [version, setVersion] = useState("");
   const [page, setPage] = useState<Page>("tracks");
+  /** The update window: notes, then the go to install. */
+  const [confirming, setConfirming] = useState(false);
+  const confirm = () => {
+    setConfirming(true);
+  };
   useBackgroundUpdateCheck();
 
   useEffect(() => {
@@ -39,7 +45,7 @@ function App() {
             Réglages
           </NavButton>
         </nav>
-        <UpdateButton />
+        <UpdateButton onOpen={confirm} />
       </header>
       <DatabaseBanner />
 
@@ -52,9 +58,17 @@ function App() {
           />
         )}
         {page === "libraries" && <LibrariesPage />}
-        {page === "settings" && <SettingsPage version={version} />}
+        {page === "settings" && <SettingsPage version={version} onInstall={confirm} />}
       </main>
       <DropZone />
+      {confirming && (
+        <UpdateDialog
+          version={version}
+          onClose={() => {
+            setConfirming(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -79,15 +93,18 @@ function NavButton(props: {
   );
 }
 
-/** Shown in the top bar once a newer version is found, like in Todoom. */
-function UpdateButton() {
-  const { available, status, install } = useUpdater();
+/**
+ * Shown in the top bar once a newer version is found, like in Todoom. It
+ * opens the update window, then shows the progress of the install.
+ */
+function UpdateButton({ onOpen }: { onOpen: () => void }) {
+  const { available, status } = useUpdater();
   if (!available) return null;
-  if (status.kind === "installing") {
+  if (status.kind === "backingUp" || status.kind === "installing") {
     return <span className="update-btn busy">{statusLine(status)?.text}</span>;
   }
   return (
-    <button className="update-btn" onClick={() => void install()}>
+    <button className="update-btn" onClick={onOpen}>
       ⬆ Mettre à jour vers {available}
     </button>
   );

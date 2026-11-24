@@ -706,3 +706,60 @@ main {
   margin: 0.25rem 0.5rem;
   max-width: 20rem;
 }
+
+/* --- The update window (KAN-38) ----------------------------------------- */
+
+.settings-failure {
+  margin: 0 0 1rem;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgb(0 0 0 / 45%);
+}
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(34rem, 100%);
+  max-height: calc(100vh - 2rem);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem 1.5rem;
+  background: var(--panel);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 30%);
+}
+
+.dialog h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.dialog h3 {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 1rem;
+}
+
+.dialog p {
+  margin: 0.5rem 0 0;
+}
+
+.update-notes {
+  overflow-y: auto;
+  margin: 0;
+  padding-left: 1.2rem;
+  overflow-wrap: anywhere;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}

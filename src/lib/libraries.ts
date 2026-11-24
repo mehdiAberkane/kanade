@@ -83,6 +83,8 @@ export interface Settings {
   scanOnStartup: boolean;
   /** « The Beatles » sorted under B. */
   ignoreArticles: boolean;
+  /** Look for a new version after launch, then every 6 hours. */
+  checkUpdates: boolean;
 }
 
 /** The events the Rust side sends (commands.rs). */

@@ -194,7 +194,7 @@ export function createMockLibraries({
   const entries: Entry[] = scenario === "empty" ? [] : sample(Date.now());
   let nextId = entries.length + 1;
   let picks = 0;
-  let settings: Settings = { scanOnStartup: true, ignoreArticles: true };
+  let settings: Settings = { scanOnStartup: true, ignoreArticles: true, checkUpdates: true };
   let view: TrackView | null = null;
   const now = Date.now();
   /** The tracks of each library, made once per library, folder and count. */
@@ -350,6 +350,9 @@ export function createMockLibraries({
         return { ...settings };
       case "settings_set":
         settings = { ...settings, ...named.settings };
+        return null;
+      case "backup_before_update":
+        // The copy of kanade.db happens on the Rust side: nothing to show.
         return null;
       case "tracks_list":
         return entries.flatMap(tracksOf);

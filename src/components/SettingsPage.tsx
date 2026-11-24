@@ -1,22 +1,31 @@
 import { statusLine } from "../lib/updater";
+import { useSettings } from "../lib/useSettings";
 import { useUpdater } from "../lib/useUpdater";
 import { LibrarySettings } from "./LibrarySettings";
 
 interface Props {
   /** Installed version, from the Rust side; empty until it answers. */
   version: string;
+  /** Opens the window that shows the new version's notes and asks first. */
+  onInstall: () => void;
 }
 
-export function SettingsPage({ version }: Props) {
-  const { available, status, checkNow, install } = useUpdater();
-  const installing = status.kind === "installing";
+export function SettingsPage({ version, onInstall }: Props) {
+  const { available, status, checkNow } = useUpdater();
+  const { settings, failure, save } = useSettings();
+  const busy = status.kind === "backingUp" || status.kind === "installing";
   const line = statusLine(status);
 
   return (
     <section className="page settings">
       <h1>Réglages</h1>
+      {failure && (
+        <p className="status status-error settings-failure" role="alert">
+          {failure}
+        </p>
+      )}
 
-      <LibrarySettings />
+      <LibrarySettings settings={settings} save={save} />
 
       <div className="settings-section">
         <h2>Mises à jour</h2>
@@ -25,12 +34,8 @@ export function SettingsPage({ version }: Props) {
         </p>
         <div className="settings-row">
           {available ? (
-            <button
-              className="btn btn-primary"
-              onClick={() => void install()}
-              disabled={installing}
-            >
-              Installer la version {available}
+            <button className="btn btn-primary" onClick={onInstall} disabled={busy}>
+              Installer la version {available}…
             </button>
           ) : (
             <button
@@ -47,9 +52,18 @@ export function SettingsPage({ version }: Props) {
             </span>
           )}
         </div>
+        <label className="settings-row">
+          <input
+            type="checkbox"
+            checked={settings?.checkUpdates ?? false}
+            disabled={!settings}
+            onChange={(event) => void save({ checkUpdates: event.target.checked })}
+          />
+          Vérifier tout seul, au lancement puis toutes les 6 heures
+        </label>
         <p className="hint">
-          Kanade vérifie aussi tout seul au lancement, puis toutes les 6 heures. L'installation
-          ferme Kanade, met la nouvelle version en place et la relance.
+          Avant d'installer, Kanade montre ce que la nouvelle version apporte et sauvegarde tes
+          données. L'installation ferme Kanade, met la nouvelle version en place et la relance.
         </p>
       </div>
     </section>
