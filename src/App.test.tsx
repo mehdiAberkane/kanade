@@ -24,7 +24,7 @@ function backend(
   database: DatabaseScenario = "ready",
 ) {
   const calls: string[] = [];
-  libraries = createMockLibraries({ stepMs: 5 });
+  libraries = createMockLibraries({ stepMs: 5, trackScale: 0.01 });
   mockIPC(
     (cmd, args) => {
       calls.push(cmd);
@@ -72,11 +72,11 @@ afterEach(async () => {
 });
 
 describe("App", () => {
-  it("opens on the libraries", async () => {
+  it("opens on the tracks", async () => {
     backend();
     const { screen } = await renderApp();
-    expect(screen.getByRole("heading", { name: "Bibliothèques" })).toBeTruthy();
-    expect(await screen.findByRole("heading", { name: "Musique" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Morceaux" })).toBeTruthy();
+    expect(await screen.findByRole("grid", { name: "Tous les morceaux" })).toBeTruthy();
   });
 
   it("shows a placeholder for the version in the settings when the Rust side fails", async () => {
@@ -96,8 +96,10 @@ describe("App", () => {
     await user.click(settings);
     expect(screen.getByRole("heading", { name: "Réglages" })).toBeTruthy();
     expect(settings.getAttribute("aria-current")).toBe("page");
-    await user.click(screen.getByRole("button", { name: "Bibliothèque" }));
+    await user.click(screen.getByRole("button", { name: "Bibliothèques" }));
     expect(screen.getByRole("heading", { name: "Bibliothèques" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Morceaux" }));
+    expect(screen.getByRole("heading", { name: "Morceaux" })).toBeTruthy();
   });
 });
 

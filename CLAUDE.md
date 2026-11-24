@@ -58,7 +58,12 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   hors ligne et une avec des fichiers OneDrive). Ils se combinent
   (`?update=available&db=restored`). Le faux sélecteur de dossier (`src/dev/mockLibraries.ts`)
   donne un dossier par clic, dont certains refusés, et les faux scans jouent leur
-  progression en deux secondes.
+  progression en deux secondes. Les bibliothèques d'exemple totalisent 50 000 faux
+  morceaux (`src/dev/mockTracks.ts`) ; les tests en prennent une fraction (`trackScale`).
+- Mesurer une durée dans le navigateur intégré : quand son panneau est masqué, la page
+  tourne en arrière-plan et Chromium n'y réveille les minuteries (et React) qu'une fois
+  par seconde. Mesurer du code synchrone (`performance.now()` autour de l'appel, modules
+  importés par `await import("/src/…")`), pas un clic jusqu'à l'affichage.
 - Installeur de test : après chaque fusion sur `main`, le job `installer` de la CI joint
   au run un MSI et un setup `.exe` non signés (artefact `kanade-windows-<commit>`, 30
   jours) ; la commande pour les télécharger est dans le README. Ce job ne tourne pas sur
@@ -131,6 +136,13 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
     `build.rs` met le manifeste Windows (`windows-app-manifest.xml`) dans tous les
     binaires, ceux des tests compris : sans lui, le binaire de test ne démarre pas
     (`STATUS_ENTRYPOINT_NOT_FOUND`).
+- Liste des morceaux (`library/listing.rs`, `src/lib/tracks.ts`) : Rust envoie tous les
+  morceaux d'un coup, un tableau compact par morceau (`tracks_list`) ; l'interface trie,
+  filtre et sélectionne en mémoire, et ne dessine que les lignes à l'écran. Mesuré sur
+  50 000 morceaux : 130 ms et 10,7 Mo côté Rust, tri en 35 à 60 ms (230 ms par chemin).
+  Le tri passe par `Intl.Collator` (accents, casse, nombres) sur des rangs calculés une
+  fois par valeur distincte ; ajouter un champ = l'ajouter à `TrackRow` des deux côtés,
+  dans le même ordre.
 - Base de données (`src-tauri/src/store`) : un seul fichier, `kanade.db`, dans
   `%LOCALAPPDATA%\fr.devsecopsforce.kanade` (jamais un dossier synchronisé), ouvert au
   lancement. Tout y est précieux (morceaux et leurs identifiants, puis données de

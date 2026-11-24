@@ -145,23 +145,27 @@ impl TooBroad {
     }
 }
 
-/// The user's settings.
+/// The user's settings. One the interface leaves out keeps its default.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     /// Scan every library when Kanade starts: on by default.
     pub scan_on_startup: bool,
+    /// Sort « The Beatles » under B in the list of tracks: on by default.
+    pub ignore_articles: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
             scan_on_startup: true,
+            ignore_articles: true,
         }
     }
 }
 
 const SCAN_ON_STARTUP: &str = "scan_on_startup";
+const IGNORE_ARTICLES: &str = "ignore_articles";
 
 impl Index {
     /// Every library, by name.
@@ -358,26 +362,35 @@ impl Index {
     }
 
     pub fn settings(&self) -> rusqlite::Result<Settings> {
-        let scan_on_startup: Option<String> = self
-            .conn
-            .query_row(
-                "SELECT value FROM settings WHERE key = ?1",
-                [SCAN_ON_STARTUP],
-                |r| r.get(0),
-            )
-            .optional()?;
+        // Each one on unless set to false: absent means the default.
+        let on = |key: &str| -> rusqlite::Result<bool> {
+            let value: Option<String> = self
+                .conn
+                .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+                    r.get(0)
+                })
+                .optional()?;
+            Ok(value.as_deref() != Some("false"))
+        };
         Ok(Settings {
-            scan_on_startup: scan_on_startup.as_deref() != Some("false"),
+            scan_on_startup: on(SCAN_ON_STARTUP)?,
+            ignore_articles: on(IGNORE_ARTICLES)?,
         })
     }
 
     pub fn save_settings(&mut self, settings: &Settings) -> rusqlite::Result<()> {
-        self.conn.execute(
-            "INSERT INTO settings (key, value) VALUES (?1, ?2) \
-             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-            params![SCAN_ON_STARTUP, settings.scan_on_startup.to_string()],
-        )?;
-        Ok(())
+        let tx = self.conn.transaction()?;
+        for (key, value) in [
+            (SCAN_ON_STARTUP, settings.scan_on_startup),
+            (IGNORE_ARTICLES, settings.ignore_articles),
+        ] {
+            tx.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2) \
+                 ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                params![key, value.to_string()],
+            )?;
+        }
+        tx.commit()
     }
 }
 
@@ -562,6 +575,7 @@ mod tests {
             LibraryError::ContainsLibrary { name: "M".into() },
             LibraryError::NotFound,
             LibraryError::EmptyName,
+            LibraryError::TrackNotFound,
             LibraryError::Io {
                 message: "denied".into(),
             },
@@ -861,15 +875,23 @@ mod tests {
     }
 
     #[test]
-    fn settings_start_with_the_scan_at_launch_on() {
+    fn settings_start_with_the_scan_at_launch_and_articles_ignored() {
         let mut index = Index::open_in_memory().unwrap();
         assert_eq!(index.settings().unwrap(), Settings::default());
         assert!(Settings::default().scan_on_startup);
+        assert!(Settings::default().ignore_articles);
         let off = Settings {
             scan_on_startup: false,
+            ignore_articles: false,
         };
         index.save_settings(&off).unwrap();
         assert_eq!(index.settings().unwrap(), off);
+        let mixed = Settings {
+            scan_on_startup: true,
+            ignore_articles: false,
+        };
+        index.save_settings(&mixed).unwrap();
+        assert_eq!(index.settings().unwrap(), mixed);
         index.save_settings(&Settings::default()).unwrap();
         assert_eq!(index.settings().unwrap(), Settings::default());
     }
@@ -910,7 +932,8 @@ mod tests {
             serde_json::from_value::<Settings>(serde_json::json!({ "scanOnStartup": false }))
                 .unwrap(),
             Settings {
-                scan_on_startup: false
+                scan_on_startup: false,
+                ignore_articles: true,
             }
         );
     }

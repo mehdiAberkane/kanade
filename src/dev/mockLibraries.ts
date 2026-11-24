@@ -14,6 +14,8 @@ import {
   type ScanProgress,
   type Settings,
 } from "../lib/libraries";
+import type { TrackRow, TrackView } from "../lib/tracks";
+import { mockTracks } from "./mockTracks";
 
 /** ?libraries=empty starts without a library; sample ones otherwise. */
 export type LibrariesScenario = "sample" | "empty";
@@ -92,21 +94,21 @@ function sample(now: number): Entry[] {
         name: "Musique",
         root: String.raw`D:\Musique`,
         addedMs: now - 90 * DAY_MS,
-        tracks: 12_480,
+        tracks: 45_945,
         scan: { state: "idle" },
         lastScan: lastScan(
           now - 2 * DAY_MS,
           { kind: "done" },
           {
             updated: 4,
-            unchanged: 12_473,
+            unchanged: 45_938,
             unreadable: 2,
             errors: 3,
           },
         ),
       },
       // Three albums added since.
-      files: 12_516,
+      files: 45_981,
       online: 0,
       reachable: true,
       errors: {
@@ -175,6 +177,11 @@ export interface MockLibraryOptions {
   scenario?: LibrariesScenario;
   /** Duration of each of the six steps of a fake scan. */
   stepMs?: number;
+  /**
+   * Share of each library's tracks listed (1: all, 50,000 in the sample;
+   * the tests take a few hundred).
+   */
+  trackScale?: number;
 }
 
 export type MockLibraries = ReturnType<typeof createMockLibraries>;
@@ -182,11 +189,27 @@ export type MockLibraries = ReturnType<typeof createMockLibraries>;
 export function createMockLibraries({
   scenario = "sample",
   stepMs = 400,
+  trackScale = 1,
 }: MockLibraryOptions = {}) {
   const entries: Entry[] = scenario === "empty" ? [] : sample(Date.now());
   let nextId = entries.length + 1;
   let picks = 0;
-  let settings: Settings = { scanOnStartup: true };
+  let settings: Settings = { scanOnStartup: true, ignoreArticles: true };
+  let view: TrackView | null = null;
+  const now = Date.now();
+  /** The tracks of each library, made once per library, folder and count. */
+  const made = new Map<string, TrackRow[]>();
+
+  function tracksOf({ view: library }: Entry): TrackRow[] {
+    const count = Math.round(library.tracks * trackScale);
+    const key = `${library.id}|${library.root}|${count}`;
+    let rows = made.get(key);
+    if (!rows) {
+      rows = mockTracks(library.id, library.root, count, now);
+      made.set(key, rows);
+    }
+    return rows;
+  }
   const queue: Job[] = [];
   let running: Running | null = null;
 
@@ -307,7 +330,12 @@ export function createMockLibraries({
 
   /** Answers a library command, or NOT_MINE. */
   function handle(cmd: string, args?: InvokeArgs): unknown {
-    const named = args as { name?: string; readOnlineOnly?: boolean; settings?: Settings };
+    const named = args as {
+      name?: string;
+      readOnlineOnly?: boolean;
+      settings?: Settings;
+      view?: TrackView;
+    };
     switch (cmd) {
       case "libraries_list":
         // By name, as the Rust side lists them.
@@ -321,8 +349,20 @@ export function createMockLibraries({
       case "settings_get":
         return { ...settings };
       case "settings_set":
-        settings = { ...named.settings } as Settings;
+        settings = { ...settings, ...named.settings };
         return null;
+      case "tracks_list":
+        return entries.flatMap(tracksOf);
+      case "track_reveal": {
+        const known = entries.some((e) => tracksOf(e).some((row) => row[0] === idOf(args)));
+        // The Explorer opens on the Rust side: nothing to show here.
+        return known ? null : refuse({ code: "track_not_found" });
+      }
+      case "track_view_get":
+        return view;
+      case "track_view_set":
+        view = named.view ?? null;
+        return view;
     }
     if (!cmd.startsWith("library_")) return NOT_MINE;
     const entry = entries.find((e) => e.view.id === idOf(args));

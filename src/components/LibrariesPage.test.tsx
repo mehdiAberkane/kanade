@@ -26,7 +26,7 @@ function backend(
   stepMs = 5,
 ) {
   const calls: { cmd: string; args: InvokeArgs | undefined }[] = [];
-  libraries = createMockLibraries({ scenario, stepMs });
+  libraries = createMockLibraries({ scenario, stepMs, trackScale: 0.01 });
   const mock = libraries;
   mockIPC(
     (cmd, args) => {
@@ -53,7 +53,10 @@ async function renderApp() {
   const { default: userEvent } = await import("@testing-library/user-event");
   const { default: App } = await import("../App");
   rtl.render(<App />);
-  return { ...rtl, user: userEvent.setup() };
+  const user = userEvent.setup();
+  // The libraries' own page; the app opens on the tracks.
+  await user.click(rtl.screen.getByRole("button", { name: "Bibliothèques" }));
+  return { ...rtl, user };
 }
 
 /** The card of a library, found by its name. */
@@ -76,7 +79,7 @@ describe("Libraries page", () => {
     const app = await renderApp();
     const musique = await card(app, "Musique");
     expect(musique.getByText(String.raw`D:\Musique`)).toBeTruthy();
-    expect(musique.getByText(/^12\s480 morceaux$/)).toBeTruthy();
+    expect(musique.getByText(/^45\s945 morceaux$/)).toBeTruthy();
     expect(musique.getByText(/^Dernier scan le .* : 4 mis à jour, 3 en erreur\.$/)).toBeTruthy();
     // Offline: said, and its tracks kept.
     const external = await card(app, "Disque externe");
@@ -238,7 +241,7 @@ describe("Library card", () => {
     await app.user.click(musique.getByRole("button", { name: "Retirer" }));
     const confirm = musique.getByRole("alertdialog", { name: "Retirer « Musique » de Kanade ?" });
     expect(confirm.textContent).toContain("Aucun fichier n'est supprimé du disque");
-    expect(confirm.textContent).toMatch(/12\s480 en tout/);
+    expect(confirm.textContent).toMatch(/45\s945 en tout/);
     // The safe answer has the focus.
     expect(document.activeElement?.textContent).toBe("Annuler");
     await app.user.click(musique.getByRole("button", { name: "Annuler" }));
@@ -376,7 +379,23 @@ describe("Settings › Bibliothèques", () => {
     expect((box as HTMLInputElement).checked).toBe(false);
     expect(calls).toContainEqual({
       cmd: "settings_set",
-      args: { settings: { scanOnStartup: false } },
+      args: { settings: { scanOnStartup: false, ignoreArticles: true } },
+    });
+  });
+
+  it("lets the articles count in the sort", async () => {
+    const { calls } = backend();
+    const app = await openSettings();
+    const box = await app.screen.findByRole<HTMLInputElement>("checkbox", {
+      name: /^Ignorer les articles pour trier/,
+    });
+    await app.waitFor(() => {
+      expect(box.checked).toBe(true);
+    });
+    await app.user.click(box);
+    expect(calls).toContainEqual({
+      cmd: "settings_set",
+      args: { settings: { scanOnStartup: true, ignoreArticles: false } },
     });
   });
 

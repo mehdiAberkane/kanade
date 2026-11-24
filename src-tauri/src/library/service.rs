@@ -13,8 +13,9 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use serde::Serialize;
 
-use super::index::Index;
+use super::index::{Index, TrackId};
 use super::libraries::{Library, LibraryId, Settings, TooBroad};
+use super::listing::{RevealTarget, TrackRow, TrackView};
 use super::scan::{LibraryError, ScanError};
 use super::scanner::{ScanEvents, ScanState, Scanner};
 use crate::store;
@@ -257,6 +258,23 @@ impl LibraryService {
         })
     }
 
+    /// Every track of every library, for the list (listing.rs).
+    pub fn tracks(&self) -> Result<Vec<TrackRow>, LibraryError> {
+        Ok(self.index().track_rows()?)
+    }
+
+    pub fn reveal_target(&self, id: TrackId) -> Result<RevealTarget, LibraryError> {
+        self.index().reveal_target(id)
+    }
+
+    pub fn track_view(&self) -> Result<Option<TrackView>, LibraryError> {
+        Ok(self.index().track_view()?)
+    }
+
+    pub fn save_track_view(&self, view: TrackView) -> Result<TrackView, LibraryError> {
+        Ok(self.index().save_track_view(view)?)
+    }
+
     pub fn settings(&self) -> Result<Settings, LibraryError> {
         Ok(self.index().settings()?)
     }
@@ -344,6 +362,7 @@ mod tests {
         s.service
             .save_settings(&Settings {
                 scan_on_startup: false,
+                ..Settings::default()
             })
             .unwrap();
         s.service.wait_idle();

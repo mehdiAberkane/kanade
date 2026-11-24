@@ -4,15 +4,16 @@ import { DatabaseBanner } from "./components/DatabaseBanner";
 import { DropZone } from "./components/DropZone";
 import { LibrariesPage } from "./components/LibrariesPage";
 import { SettingsPage } from "./components/SettingsPage";
+import { TracksPage } from "./components/TracksPage";
 import { statusLine } from "./lib/updater";
 import { useBackgroundUpdateCheck, useUpdater } from "./lib/useUpdater";
 import "./App.css";
 
-type Page = "library" | "settings";
+type Page = "tracks" | "libraries" | "settings";
 
 function App() {
   const [version, setVersion] = useState("");
-  const [page, setPage] = useState<Page>("library");
+  const [page, setPage] = useState<Page>("tracks");
   useBackgroundUpdateCheck();
 
   useEffect(() => {
@@ -28,8 +29,11 @@ function App() {
       <header className="topbar">
         <span className="brand">Kanade</span>
         <nav className="nav">
-          <NavButton current={page} page="library" onSelect={setPage}>
-            Bibliothèque
+          <NavButton current={page} page="tracks" onSelect={setPage}>
+            Morceaux
+          </NavButton>
+          <NavButton current={page} page="libraries" onSelect={setPage}>
+            Bibliothèques
           </NavButton>
           <NavButton current={page} page="settings" onSelect={setPage}>
             Réglages
@@ -39,7 +43,17 @@ function App() {
       </header>
       <DatabaseBanner />
 
-      <main>{page === "library" ? <LibrariesPage /> : <SettingsPage version={version} />}</main>
+      <main>
+        {page === "tracks" && (
+          <TracksPage
+            onManage={() => {
+              setPage("libraries");
+            }}
+          />
+        )}
+        {page === "libraries" && <LibrariesPage />}
+        {page === "settings" && <SettingsPage version={version} />}
+      </main>
       <DropZone />
     </div>
   );

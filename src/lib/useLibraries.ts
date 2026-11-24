@@ -27,6 +27,27 @@ export function useTauriEvents(subscribe: () => Promise<UnlistenFn>[]) {
   }, [subscribe]);
 }
 
+/**
+ * « Ajouter un dossier… »: the folder picker opens on the Rust side; the
+ * interface asks for one, it never gives a path.
+ */
+export function useAddLibrary() {
+  const [adding, setAdding] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const add = useCallback(async () => {
+    setAdding(true);
+    setRefusal(null);
+    try {
+      await invoke("library_add");
+    } catch (e) {
+      setRefusal(errorText(e));
+    } finally {
+      setAdding(false);
+    }
+  }, []);
+  return { add, adding, refusal };
+}
+
 export function useLibraries() {
   /** null until the first answer. */
   const [libraries, setLibraries] = useState<LibraryView[] | null>(null);
