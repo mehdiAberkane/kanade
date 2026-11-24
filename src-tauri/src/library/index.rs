@@ -114,7 +114,7 @@ impl Changes {
 }
 
 pub struct Index {
-    conn: Connection,
+    pub(super) conn: Connection,
 }
 
 impl Index {
@@ -264,6 +264,21 @@ impl Index {
              FROM tracks ORDER BY path"
         ))?;
         stmt.query_map([], indexed_from_row)?.collect()
+    }
+
+    /// How many tracks are under `root`, as `known_under` sees it.
+    pub fn count_under(&self, root: &str) -> rusqlite::Result<usize> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT path FROM tracks WHERE path LIKE ?1 ESCAPE '!'")?;
+        let mut rows = stmt.query([paths::like_under(root)])?;
+        let mut count = 0;
+        while let Some(row) = rows.next()? {
+            if paths::is_under(&row.get::<_, String>(0)?, root) {
+                count += 1;
+            }
+        }
+        Ok(count)
     }
 
     pub fn count(&self) -> rusqlite::Result<u64> {

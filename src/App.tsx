@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { DatabaseBanner } from "./components/DatabaseBanner";
+import { DropZone } from "./components/DropZone";
+import { LibrariesPage } from "./components/LibrariesPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { statusLine } from "./lib/updater";
 import { useBackgroundUpdateCheck, useUpdater } from "./lib/useUpdater";
@@ -37,16 +39,8 @@ function App() {
       </header>
       <DatabaseBanner />
 
-      <main>
-        {page === "library" ? (
-          <section className="page library">
-            <h1>Kanade</h1>
-            <p>Gestionnaire de bibliothèque musicale{version && ` — v${version}`}</p>
-          </section>
-        ) : (
-          <SettingsPage version={version} />
-        )}
-      </main>
+      <main>{page === "library" ? <LibrariesPage /> : <SettingsPage version={version} />}</main>
+      <DropZone />
     </div>
   );
 }

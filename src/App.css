@@ -10,6 +10,7 @@
   --error: #b3261e;
   --warning-bg: #fff4d6;
   --error-bg: #fde7e5;
+  --danger-text: #ffffff;
 
   font-family: "Segoe UI", Inter, Avenir, Helvetica, Arial, sans-serif;
   font-size: 16px;
@@ -34,6 +35,7 @@
     --error: #f28b82;
     --warning-bg: #3d3420;
     --error-bg: #3f2422;
+    --danger-text: #141414;
   }
 }
 
@@ -129,19 +131,206 @@ button {
   padding: 2rem 1.25rem;
 }
 
-.library {
-  padding-top: 10vh;
-  text-align: center;
-}
-
 h1 {
   margin: 0 0 0.5rem;
-  font-size: 2.5rem;
+  font-size: 1.75rem;
 }
 
 .settings h1 {
-  font-size: 1.75rem;
   margin-bottom: 1.25rem;
+}
+
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.page-head h1 {
+  margin: 0;
+}
+
+.empty {
+  background: var(--panel);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 1.5rem;
+  text-align: center;
+}
+
+.library-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.library-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+}
+
+.library-card p {
+  margin: 0 0 0.5rem;
+}
+
+.library-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+
+.library-head h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.library-root,
+.folder,
+.error-path {
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+}
+
+.library-root {
+  color: var(--muted);
+}
+
+/* Offline: the library and its tracks stay, greyed. */
+.state-offline .library-head h2,
+.state-offline .library-root + p {
+  color: var(--muted);
+}
+
+.badge {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.05rem 0.6rem;
+  background: var(--bg);
+  font-size: 0.8rem;
+}
+
+.badge-scanning {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.badge-offline {
+  background: var(--warning-bg);
+}
+
+.scan-progress progress {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  background: var(--warning-bg);
+}
+
+.library-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.library-actions input {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.confirm {
+  margin-top: 0.5rem;
+  border: 1px solid var(--error);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  background: var(--error-bg);
+}
+
+/* After .btn, which comes later in the file. */
+.btn.btn-danger {
+  border-color: var(--error);
+  background: var(--error);
+  color: var(--danger-text);
+}
+
+.scan-errors {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+}
+
+.scan-errors ul {
+  list-style: none;
+  max-height: 16rem;
+  overflow: auto;
+  margin: 0 0 0.5rem;
+  padding: 0;
+}
+
+.scan-errors li {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+  padding: 0.3rem 0;
+}
+
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px dashed var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  pointer-events: none;
+}
+
+.drop-overlay p {
+  border-radius: 10px;
+  padding: 1rem 1.5rem;
+  background: var(--panel);
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.drop-notice {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  max-width: 28rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  background: var(--panel);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 15%);
+}
+
+.drop-notice ul {
+  margin: 0 0 0.5rem;
+  padding-left: 1.1rem;
+  overflow-wrap: anywhere;
 }
 
 .settings-section {
@@ -149,6 +338,10 @@ h1 {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 1rem 1.25rem;
+}
+
+.settings-section + .settings-section {
+  margin-top: 1rem;
 }
 
 .settings-section h2 {

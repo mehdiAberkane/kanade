@@ -41,7 +41,7 @@ La CI mesure aussi la couverture et échoue si elle baisse sous un seuil :
 
 ```bash
 npm run test:coverage                              # seuils : vitest.config.ts
-cd src-tauri && cargo llvm-cov --locked --fail-under-lines 94
+cd src-tauri && cargo llvm-cov --locked --fail-under-lines 95
 ```
 
 Outils : `cargo install cargo-deny --locked --version 0.22.0`,

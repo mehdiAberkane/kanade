@@ -29,6 +29,9 @@ walkdir = "2.5.1"
 rusqlite = { version = "0.43.0", features = ["bundled"] }
 tauri-plugin-updater = "2.14.1"
 tauri-plugin-process = "2.4.0"
+# The folder picker and the save dialog of Windows, opened from the Rust
+# side only: the interface never gives a path (commands.rs).
+rfd = { version = "0.17.2", default-features = false }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
@@ -42,6 +45,8 @@ strip = true
 
 [dev-dependencies]
 tempfile = "3.27.0"
+# Mock runtime: the commands are tested through Tauri's IPC (commands.rs).
+tauri = { version = "2", features = ["test"] }
 
 # Clippy rules beyond the defaults, chosen from the pedantic group rather
 # than all of it (too noisy). The CI runs Clippy with -D warnings: each one
