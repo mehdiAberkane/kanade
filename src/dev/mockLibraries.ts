@@ -14,6 +14,7 @@ import {
   type ScanProgress,
   type Settings,
 } from "../lib/libraries";
+import type { AlbumView } from "../lib/albums";
 import type { TrackRow, TrackView } from "../lib/tracks";
 import { mockTracks } from "./mockTracks";
 
@@ -164,6 +165,36 @@ function sample(now: number): Entry[] {
 }
 
 /** The Rust side rejects with the error object, as these do. */
+/**
+ * The cover of the fake track's album, drawn in SVG where the Rust side
+ * sends a JPEG: most albums have one in their tags, half the others a
+ * cover.jpg, the rest none (empty bytes).
+ */
+function coverOf(row: TrackRow): Uint8Array<ArrayBuffer> {
+  const album = row[8];
+  const none = new Uint8Array(0);
+  if (!album) return none;
+  let hash = 7;
+  for (let i = 0; i < album.length; i++) hash = (hash * 31 + album.charCodeAt(i)) >>> 0;
+  if (!row[19] && hash % 2 === 0) return none;
+  const hue = hash % 360;
+  const initials = album
+    .split(" ")
+    .slice(0, 2)
+    .map((word) => word.charAt(0).toUpperCase())
+    .join("");
+  const svg = [
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">',
+    '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">',
+    `<stop offset="0" stop-color="hsl(${hue} 60% 55%)"/>`,
+    `<stop offset="1" stop-color="hsl(${(hue + 50) % 360} 55% 28%)"/>`,
+    '</linearGradient></defs><rect width="100" height="100" fill="url(#g)"/>',
+    '<text x="50" y="62" font-family="Segoe UI, sans-serif" font-size="34"',
+    ` text-anchor="middle" fill="white">${initials}</text></svg>`,
+  ].join("");
+  return new TextEncoder().encode(svg);
+}
+
 function refuse(error: LibraryError): Promise<never> {
   // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
   return Promise.reject(error);
@@ -196,6 +227,7 @@ export function createMockLibraries({
   let picks = 0;
   let settings: Settings = { scanOnStartup: true, ignoreArticles: true, checkUpdates: true };
   let view: TrackView | null = null;
+  let albumView: AlbumView | null = null;
   const now = Date.now();
   /** The tracks of each library, made once per library, folder and count. */
   const made = new Map<string, TrackRow[]>();
@@ -209,6 +241,21 @@ export function createMockLibraries({
       made.set(key, rows);
     }
     return rows;
+  }
+  /** Each library's tracks by id: a grid asks for hundreds of covers. */
+  const byId = new WeakMap<TrackRow[], Map<unknown, TrackRow>>();
+  function rowById(id: unknown): TrackRow | undefined {
+    for (const entry of entries) {
+      const rows = tracksOf(entry);
+      let index = byId.get(rows);
+      if (!index) {
+        index = new Map(rows.map((r) => [r[0], r]));
+        byId.set(rows, index);
+      }
+      const row = index.get(id);
+      if (row) return row;
+    }
+    return undefined;
   }
   const queue: Job[] = [];
   let running: Running | null = null;
@@ -366,6 +413,18 @@ export function createMockLibraries({
       case "track_view_set":
         view = named.view ?? null;
         return view;
+      case "track_cover": {
+        const row = rowById(idOf(args));
+        return row ? coverOf(row) : refuse({ code: "track_not_found" });
+      }
+      case "album_view_get":
+        return albumView;
+      case "album_view_set": {
+        const asked = (args as { view?: AlbumView } | undefined)?.view;
+        // Bounded as the Rust side does it.
+        albumView = asked ? { ...asked, size: Math.min(320, Math.max(120, asked.size)) } : null;
+        return albumView;
+      }
     }
     if (!cmd.startsWith("library_")) return NOT_MINE;
     const entry = entries.find((e) => e.view.id === idOf(args));

@@ -13,6 +13,7 @@ import {
   type MockLibraries,
 } from "./mockLibraries";
 import type { LibraryView } from "../lib/libraries";
+import type { TrackRow } from "../lib/tracks";
 
 let libraries: MockLibraries | undefined;
 
@@ -154,6 +155,36 @@ describe("fake tracks", () => {
     const [first] = await invoke<number[][]>("tracks_list");
     expect(await invoke("track_reveal", { id: first[0] })).toBeNull();
     await expect(invoke("track_reveal", { id: -1 })).rejects.toEqual({ code: "track_not_found" });
+  });
+
+  it("draws the covers of most albums, and keeps the albums' grid", async () => {
+    setup();
+    // A sample: the fake libraries hold 50,000 tracks.
+    const sample = (await invoke<TrackRow[]>("tracks_list")).slice(0, 500);
+    const covers = await Promise.all(
+      sample.map((row) => invoke<Uint8Array>("track_cover", { id: row[0], size: "small" })),
+    );
+    const drawn = covers.filter((bytes) => bytes.length > 0);
+    // SVG, for the browser preview, where the Rust side sends a JPEG.
+    expect(new TextDecoder().decode(drawn[0]).startsWith("<svg")).toBe(true);
+    expect(drawn.length).toBeGreaterThan(sample.length / 2);
+    expect(drawn.length).toBeLessThan(sample.length);
+    // A track without album has none.
+    const loose = sample.findIndex((row) => row[8] === null);
+    expect(covers[loose]).toHaveLength(0);
+    await expect(invoke("track_cover", { id: -1, size: "small" })).rejects.toEqual({
+      code: "track_not_found",
+    });
+
+    expect(await invoke("album_view_get")).toBeNull();
+    const view = { sort: { column: "year", descending: true }, size: 999 };
+    expect(await invoke("album_view_set", { view })).toEqual({ ...view, size: 320 });
+    expect(await invoke("album_view_get")).toEqual({ ...view, size: 320 });
+    expect(await invoke("album_view_set", { view: { ...view, size: 3 } })).toEqual({
+      ...view,
+      size: 120,
+    });
+    expect(await invoke("album_view_set", {})).toBeNull();
   });
 
   it("keeps the columns of the list, and the settings changed", async () => {

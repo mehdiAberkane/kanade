@@ -81,8 +81,8 @@ describe("App", () => {
   it("opens on the tracks", async () => {
     backend();
     const { screen } = await renderApp();
-    expect(screen.getByRole("heading", { name: "Morceaux" })).toBeTruthy();
-    expect(await screen.findByRole("grid", { name: "Tous les morceaux" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Musique" })).toBeTruthy();
+    expect(await screen.findByRole("grid", { name: "Toute la musique" })).toBeTruthy();
   });
 
   it("shows a placeholder for the version in the settings when the Rust side fails", async () => {
@@ -104,8 +104,8 @@ describe("App", () => {
     expect(settings.getAttribute("aria-current")).toBe("page");
     await user.click(screen.getByRole("button", { name: "Bibliothèques" }));
     expect(screen.getByRole("heading", { name: "Bibliothèques" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Morceaux" }));
-    expect(screen.getByRole("heading", { name: "Morceaux" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Musique" }));
+    expect(screen.getByRole("heading", { name: "Musique" })).toBeTruthy();
   });
 });
 

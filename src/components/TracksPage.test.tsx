@@ -51,6 +51,7 @@ function row(fields: {
     fields.size ?? 20_000_000,
     null,
     1_700_000_000_000,
+    false,
   ];
 }
 
@@ -124,7 +125,7 @@ function titles(app: App) {
     .map((r) => r.querySelector("[role=gridcell]")?.firstChild?.textContent);
 }
 
-async function grid(app: App, name = "Tous les morceaux") {
+async function grid(app: App, name = "Toute la musique") {
   const found = await app.screen.findByRole("grid", { name });
   await app.waitFor(() => {
     expect(app.within(found).getAllByRole("row").length).toBeGreaterThan(1);
@@ -171,11 +172,11 @@ describe("Tracks page", () => {
     const app = await renderApp();
     await grid(app);
     const side = app.within(app.screen.getByRole("navigation", { name: "Bibliothèques suivies" }));
-    expect(side.getByRole("button", { name: /Tous les morceaux\s*8/ })).toBeTruthy();
+    expect(side.getByRole("button", { name: /Toute la musique\s*8/ })).toBeTruthy();
     await app.user.click(side.getByRole("button", { name: /^OneDrive/ }));
     await grid(app, "OneDrive");
     expect(titles(app)).toEqual(["Cloud song"]);
-    await app.user.click(side.getByRole("button", { name: /^Tous les morceaux/ }));
+    await app.user.click(side.getByRole("button", { name: /^Toute la musique/ }));
     await grid(app);
     expect(titles(app)).toHaveLength(8);
 
@@ -201,8 +202,8 @@ describe("Tracks page", () => {
     await app.user.click(
       app.within(app.screen.getByRole("alertdialog")).getByRole("button", { name: "Retirer" }),
     );
-    await app.user.click(app.screen.getByRole("button", { name: "Morceaux" }));
-    expect(await app.screen.findByRole("grid", { name: "Tous les morceaux" })).toBeTruthy();
+    await app.user.click(app.screen.getByRole("button", { name: "Musique" }));
+    expect(await app.screen.findByRole("grid", { name: "Toute la musique" })).toBeTruthy();
   });
 
   it("starts empty, and fills as the first library is scanned", async () => {
@@ -236,7 +237,8 @@ describe("Tracks page", () => {
     });
     const app = await renderApp();
     expect(await app.screen.findByText("Aucun morceau pour l'instant.")).toBeTruthy();
-    const musique = await app.screen.findByRole("button", { name: /^Musique/ });
+    const side = app.screen.getByRole("navigation", { name: "Bibliothèques suivies" });
+    const musique = await app.within(side).findByRole("button", { name: /^Musique/ });
     expect(musique.textContent).toContain("scan");
     await app.user.click(musique);
     expect(await app.screen.findByText("Scan en cours : les morceaux arrivent.")).toBeTruthy();
@@ -588,7 +590,7 @@ describe("Track menu", () => {
     expect(app.screen.getByRole("menu")).toBeTruthy();
     await app.user.click(app.screen.getByRole("menu"));
     expect(app.screen.getByRole("menu")).toBeTruthy();
-    await app.user.click(app.screen.getByRole("heading", { name: "Morceaux", hidden: true }));
+    await app.user.click(app.screen.getByRole("heading", { name: "Musique", hidden: true }));
     expect(app.screen.queryByRole("menu")).toBeNull();
     await app.user.keyboard("{Tab}");
     // A right click away from the rows opens nothing.
