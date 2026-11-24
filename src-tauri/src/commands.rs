@@ -228,6 +228,21 @@ pub fn settings_set(
     libraries.get()?.save_settings(&settings)
 }
 
+/// A copy of the database before an update installs. Without a database
+/// there is nothing to copy, and the update goes on: it may well be the fix
+/// (a database written by a newer Kanade is left as it was).
+fn backup(libraries: &Libraries) -> Result<(), LibraryError> {
+    if let Some(service) = &libraries.0 {
+        service.backup_before_update()?;
+    }
+    Ok(())
+}
+
+#[tauri::command(async)]
+pub fn backup_before_update(libraries: State<'_, Libraries>) -> Result<(), LibraryError> {
+    backup(&libraries)
+}
+
 /// Every track of every library, for the list.
 #[tauri::command(async)]
 pub fn tracks_list(libraries: State<'_, Libraries>) -> Result<Vec<TrackRow>, LibraryError> {
@@ -386,6 +401,8 @@ mod tests {
         );
         let report = dropped(&none, &[PathBuf::from("C:\\Musique")]);
         assert_eq!(report.refused[0].error, closed);
+        // Nothing to copy before an update, which may be the fix: it goes on.
+        assert_eq!(backup(&none), Ok(()));
     }
 
     #[test]
@@ -442,6 +459,7 @@ mod tests {
                 library_errors,
                 settings_get,
                 settings_set,
+                backup_before_update,
                 tracks_list,
                 track_view_get,
                 track_view_set,
@@ -524,18 +542,30 @@ mod tests {
 
         assert_eq!(
             invoke(&webview, "settings_get", serde_json::json!({})).unwrap(),
-            serde_json::json!({ "scanOnStartup": true, "ignoreArticles": true })
+            serde_json::json!({ "scanOnStartup": true, "ignoreArticles": true, "checkUpdates": true })
         );
         invoke(
             &webview,
             "settings_set",
-            serde_json::json!({ "settings": { "scanOnStartup": false } }),
+            serde_json::json!({ "settings": { "scanOnStartup": false, "checkUpdates": false } }),
         )
         .unwrap();
         assert_eq!(
             invoke(&webview, "settings_get", serde_json::json!({})).unwrap(),
-            serde_json::json!({ "scanOnStartup": false, "ignoreArticles": true })
+            serde_json::json!({ "scanOnStartup": false, "ignoreArticles": true, "checkUpdates": false })
         );
+
+        // Before an update installs: a copy of the database, with the others.
+        assert_eq!(
+            invoke(&webview, "backup_before_update", serde_json::json!({})).unwrap(),
+            serde_json::Value::Null
+        );
+        let names: Vec<String> = store::backups(&data)
+            .unwrap()
+            .into_iter()
+            .filter_map(|(_, path)| Some(path.file_name()?.to_str()?.to_owned()))
+            .collect();
+        assert!(names.iter().any(|n| n.ends_with("-update.db")), "{names:?}");
 
         // The list: an empty folder has no track; its columns as left.
         assert_eq!(

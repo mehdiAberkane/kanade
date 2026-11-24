@@ -283,6 +283,15 @@ impl LibraryService {
         Ok(self.index().save_settings(settings)?)
     }
 
+    /// A copy of the database before an update installs
+    /// (`store::backup_before_update`); it returns where.
+    pub fn backup_before_update(&self) -> Result<PathBuf, LibraryError> {
+        Ok(store::backup_before_update(
+            &self.index().conn,
+            store::now_ms(),
+        )?)
+    }
+
     /// Waits until no scan waits or runs.
     #[cfg(test)]
     pub(crate) fn wait_idle(&self) {

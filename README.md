@@ -52,13 +52,33 @@ Outils : `cargo install cargo-deny --locked --version 0.22.0`,
 ## Mises à jour
 
 Kanade cherche une nouvelle version sur les Releases GitHub du dépôt : au lancement, puis
-toutes les 6 heures, ou avec le bouton de Réglages › Mises à jour. Il ne l'installe que
-si elle est signée avec la clé de Kanade.
+toutes les 6 heures (une case de Réglages › Mises à jour le coupe), ou avec le bouton
+« Vérifier les mises à jour ». Quand il en trouve une, il montre ce qu'elle apporte et
+attend ton accord. Il sauvegarde alors la base (`backups\kanade-<date>-update.db`), puis
+télécharge, installe et redémarre. Il n'installe qu'une version plus récente, signée
+avec la clé de Kanade, et dont la signature porte le numéro annoncé
+(`requireSignedVersion`).
 
 `npm run release` (ou `minor`, `major`, `x.y.z`) monte la version, puis crée et pousse le
 tag. GitHub Actions vérifie le code, construit et signe l'installeur MSI, puis publie la
-Release que Kanade propose d'installer. La clé de signature, sa sauvegarde et son
-remplacement sont décrits dans [`docs/cle-de-signature.md`](docs/cle-de-signature.md).
+Release que Kanade propose d'installer. Ses notes sont les titres des pull requests
+fusionnées depuis la version précédente. La clé de signature (dans l'environnement GitHub
+`release`), sa sauvegarde et son remplacement sont décrits dans
+[`docs/cle-de-signature.md`](docs/cle-de-signature.md).
 
-L'installeur n'a pas de signature de code Windows. SmartScreen affiche donc une alerte
-quand on lance pour la première fois l'installeur téléchargé depuis GitHub.
+### Vérifier l'installeur
+
+L'installeur n'a pas de signature de code Windows : SmartScreen affiche donc une alerte
+quand on lance pour la première fois l'installeur téléchargé depuis GitHub (« Informations
+complémentaires », puis « Exécuter quand même »). Les mises à jour faites depuis Kanade
+n'ont pas cette alerte, et leur signature est vérifiée par Kanade.
+
+Pour s'assurer que le fichier téléchargé est bien celui que GitHub Actions a construit,
+compare son empreinte SHA-256 avec celle donnée dans les notes de la Release (GitHub
+l'affiche aussi à côté du fichier) :
+
+```powershell
+(Get-FileHash "$env:USERPROFILE\Downloads\Kanade_0.3.0_x64_en-US.msi" -Algorithm SHA256).Hash.ToLower()
+```
+
+Les deux doivent être identiques. Sinon, n'installe pas ce fichier.

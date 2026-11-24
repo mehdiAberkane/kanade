@@ -70,8 +70,12 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   les PR et n'est pas exigé.
 - Publier une version : `npm run release` (ou `minor`, `major`, `x.y.z`) depuis `main` à
   jour. Le tag lance `release.yml`, qui vérifie, construit et signe l'installeur MSI,
-  puis publie la Release que l'app propose d'installer. Clé de signature :
-  `docs/cle-de-signature.md`. Quand publier :
+  puis publie la Release que l'app propose d'installer. Ses notes sont les titres des PR
+  fusionnées depuis le tag précédent (l'app les montre avant d'installer) : un titre de PR
+  se lit donc aussi comme une ligne de notes de version. La page de la Release ajoute le
+  SHA-256 du MSI. Clé de signature : secrets de l'environnement GitHub `release`, jamais
+  du dépôt (`docs/cle-de-signature.md`). Avant d'installer, l'app copie la base
+  (`backup_before_update`). Quand publier :
   - **Une fois tous les tickets de « À faire » terminés** (colonne vide, tout fusionné et
     en « A verifier »), publie une nouvelle version sans attendre que je la demande :
     `npm run release minor` si la série apporte une fonctionnalité, `npm run release`

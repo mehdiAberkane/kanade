@@ -84,6 +84,7 @@ pub fn run() {
             commands::library_export_errors,
             commands::settings_get,
             commands::settings_set,
+            commands::backup_before_update,
             commands::tracks_list,
             commands::track_reveal,
             commands::track_view_get,
@@ -122,6 +123,83 @@ mod tests {
         assert_eq!(updater["windows"]["installMode"], "passive");
         // The release build writes the .sig files and latest.json.
         assert_eq!(conf["bundle"]["createUpdaterArtifacts"], true);
+        // latest.json is not signed, only the installer is: the version
+        // announced must be the one signed with the installer, or an older
+        // genuine installer could come back under a newer number.
+        assert_eq!(updater["requireSignedVersion"], true);
+        // Never an older version.
+        assert!(updater.get("allowDowngrades").is_none());
+    }
+
+    /// The signature of the Kanade 0.2.0 installer, as published in its
+    /// latest.json: Kanade's key, `version:0.2.0` in its trusted comment.
+    const SIGNED_0_2_0: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTMEtjZzA2WDN2cytSRzN3NGlyckc4R1hhOUtBbGJ6YTNmT012RFR0VjAyOEZNWjhzTVdGb0hrMmxRUjRYVXZaWG15aWdKVUlVM2JmcUw0aC92S2ZBZEFNaTNTVGp3WFFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDU5OTA4CWZpbGU6S2FuYWRlXzAuMi4wX3g2NF9lbi1VUy5tc2kJdmVyc2lvbjowLjIuMApsQkozYWFSU3ZSS3NuRjVpUnZKTTZYM1hEaGRjYVczbXkvNnBKb1FQM0ZTbUxXTnFJTjRtL2o1V2kyQmpHWUprOGFCRWVFS3dHbWdSOHRDcUQ3eG5CZz09Cg==";
+
+    /// The bytes `kanade`, signed by a throwaway key that is not Kanade's
+    /// (made for this test, then deleted).
+    const SIGNED_BY_ANOTHER_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUS1d6YS9QNUxpREx5QkdBQVY4UDMreFJBMWlSSjJZbG41TEQvTnVSUnVpV1FGejVSY1V6enIvRGNuQ241S0MzR3pZUFNJSVBLUWpGY3hJNjhoZkhqSk96Z3BXZUdOK2dVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTQ4ODAwCWZpbGU6cGF5bG9hZC50eHQKK1MwT1o1bCtydjZXQUJjLysvdUlJYlZxdWxoM3I3K05PUGFVdGhEVGRYV2ZmZEEySlZqaHQ5UFZwZHpFR3VBM0EyOXJBcER0eVpMb2U2ZW43VVlCQ2c9PQo=";
+
+    /// The updater as installed copies run it, with the key and settings of
+    /// tauri.conf.json: a release that is not newer is not offered, and an
+    /// installer whose signature does not match, or comes from another key,
+    /// is refused before anything is installed.
+    #[test]
+    fn updates_are_refused_when_older_or_wrongly_signed() {
+        use tauri_plugin_updater::UpdaterExt;
+
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        context
+            .config_mut()
+            .plugins
+            .0
+            .insert("updater".into(), conf["plugins"]["updater"].clone());
+        context.package_info_mut().version = env!("CARGO_PKG_VERSION").parse().unwrap();
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .build(context)
+            .unwrap();
+        let updater = app.updater().unwrap();
+        let release = |version: &str, signature: &str| {
+            let platform = serde_json::json!({
+                "url": "https://github.com/mehdiAberkane/kanade/releases/download/v0.2.0/Kanade_0.2.0_x64_en-US.msi",
+                "signature": signature,
+            });
+            serde_json::json!({
+                "version": version,
+                "notes": "- KAN-1: something",
+                "pub_date": "2026-11-23T18:51:49Z",
+                "platforms": { "windows-x86_64": platform, "windows-x86_64-msi": platform },
+            })
+        };
+
+        // Older or the same: not offered.
+        for version in ["0.0.1", env!("CARGO_PKG_VERSION")] {
+            let offered = updater
+                .restore_update(release(version, SIGNED_0_2_0))
+                .unwrap();
+            assert!(offered.is_none(), "{version}");
+        }
+        // Newer, with Kanade's signature of another file: refused.
+        let update = updater
+            .restore_update(release("99.0.0", SIGNED_0_2_0))
+            .unwrap()
+            .unwrap();
+        assert_eq!(update.body.as_deref(), Some("- KAN-1: something"));
+        assert!(matches!(
+            update.verify(b"not the installer"),
+            Err(tauri_plugin_updater::Error::Minisign(_))
+        ));
+        // Newer, the file matches its signature, but the key is not Kanade's.
+        let update = updater
+            .restore_update(release("99.0.0", SIGNED_BY_ANOTHER_KEY))
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            update.verify(b"kanade"),
+            Err(tauri_plugin_updater::Error::Minisign(_))
+        ));
     }
 
     #[test]

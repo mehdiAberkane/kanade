@@ -153,6 +153,9 @@ pub struct Settings {
     pub scan_on_startup: bool,
     /// Sort « The Beatles » under B in the list of tracks: on by default.
     pub ignore_articles: bool,
+    /// Look for a new version on GitHub after launch, then every 6 hours: on
+    /// by default. The button in the settings works either way.
+    pub check_updates: bool,
 }
 
 impl Default for Settings {
@@ -160,12 +163,14 @@ impl Default for Settings {
         Self {
             scan_on_startup: true,
             ignore_articles: true,
+            check_updates: true,
         }
     }
 }
 
 const SCAN_ON_STARTUP: &str = "scan_on_startup";
 const IGNORE_ARTICLES: &str = "ignore_articles";
+const CHECK_UPDATES: &str = "check_updates";
 
 impl Index {
     /// Every library, by name.
@@ -375,6 +380,7 @@ impl Index {
         Ok(Settings {
             scan_on_startup: on(SCAN_ON_STARTUP)?,
             ignore_articles: on(IGNORE_ARTICLES)?,
+            check_updates: on(CHECK_UPDATES)?,
         })
     }
 
@@ -383,6 +389,7 @@ impl Index {
         for (key, value) in [
             (SCAN_ON_STARTUP, settings.scan_on_startup),
             (IGNORE_ARTICLES, settings.ignore_articles),
+            (CHECK_UPDATES, settings.check_updates),
         ] {
             tx.execute(
                 "INSERT INTO settings (key, value) VALUES (?1, ?2) \
@@ -875,20 +882,23 @@ mod tests {
     }
 
     #[test]
-    fn settings_start_with_the_scan_at_launch_and_articles_ignored() {
+    fn settings_start_with_the_scan_at_launch_articles_ignored_and_update_checks() {
         let mut index = Index::open_in_memory().unwrap();
         assert_eq!(index.settings().unwrap(), Settings::default());
         assert!(Settings::default().scan_on_startup);
         assert!(Settings::default().ignore_articles);
+        assert!(Settings::default().check_updates);
         let off = Settings {
             scan_on_startup: false,
             ignore_articles: false,
+            check_updates: false,
         };
         index.save_settings(&off).unwrap();
         assert_eq!(index.settings().unwrap(), off);
         let mixed = Settings {
             scan_on_startup: true,
             ignore_articles: false,
+            check_updates: false,
         };
         index.save_settings(&mixed).unwrap();
         assert_eq!(index.settings().unwrap(), mixed);
@@ -934,7 +944,12 @@ mod tests {
             Settings {
                 scan_on_startup: false,
                 ignore_articles: true,
+                check_updates: true,
             }
+        );
+        assert_eq!(
+            serde_json::to_value(Settings::default()).unwrap(),
+            serde_json::json!({ "scanOnStartup": true, "ignoreArticles": true, "checkUpdates": true })
         );
     }
 }

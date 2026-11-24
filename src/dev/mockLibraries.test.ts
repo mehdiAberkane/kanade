@@ -164,7 +164,12 @@ describe("fake tracks", () => {
     expect(await invoke("track_view_get")).toEqual(view);
     expect(await invoke("track_view_set", {})).toBeNull();
     await invoke("settings_set", { settings: { ignoreArticles: false } });
-    expect(await invoke("settings_get")).toEqual({ scanOnStartup: true, ignoreArticles: false });
+    expect(await invoke("settings_get")).toEqual({
+      scanOnStartup: true,
+      ignoreArticles: false,
+      checkUpdates: true,
+    });
+    expect(await invoke("backup_before_update")).toBeNull();
   });
 });
 
@@ -173,6 +178,10 @@ describe("installMockBackend", () => {
     window.history.replaceState(null, "", "/?libraries=empty");
     installMockBackend();
     expect(await list()).toEqual([]);
-    expect(await invoke("settings_get")).toEqual({ scanOnStartup: true, ignoreArticles: true });
+    expect(await invoke("settings_get")).toEqual({
+      scanOnStartup: true,
+      ignoreArticles: true,
+      checkUpdates: true,
+    });
   });
 });

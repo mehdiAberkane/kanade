@@ -75,6 +75,34 @@ fn a_new_database_is_created_migrated_in_wal_mode_and_backed_up() {
 }
 
 #[test]
+fn a_copy_is_taken_before_an_update_and_kept_with_the_others() {
+    let dir = tempfile::tempdir().unwrap();
+    open_and_add(dir.path(), NOW, &[r"C:\Music\a.flac"]);
+    let conn = Connection::open(dir.path().join(DB_FILE)).unwrap();
+    let copy = backup_before_update(&conn, NOW + HOUR).unwrap();
+    drop(conn);
+    assert_eq!(
+        copy.file_name().unwrap().to_str().unwrap(),
+        format!("kanade-{}-update.db", stamp(NOW + HOUR))
+    );
+    // Newest first, before the daily copy: a damaged database comes back
+    // from it.
+    let listed = backups(dir.path()).unwrap();
+    assert_eq!(listed.len(), 2);
+    assert_eq!(listed[0].0, NOW + HOUR);
+    assert_eq!(listed[0].1.file_name(), copy.file_name());
+    truncate(&dir.path().join(DB_FILE));
+    assert_eq!(paths(dir.path(), NOW + 2 * HOUR), [r"C:\Music\a.flac"]);
+
+    // A database that is not in a file has nowhere to be copied.
+    let memory = Connection::open_in_memory().unwrap();
+    assert!(matches!(
+        backup_before_update(&memory, NOW),
+        Err(StoreError::Io { .. })
+    ));
+}
+
+#[test]
 fn the_data_survives_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     open_and_add(dir.path(), NOW, &[r"C:\Music\a.flac"]);

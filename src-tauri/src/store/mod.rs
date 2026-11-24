@@ -155,7 +155,7 @@ pub fn open(dir: &Path, now_ms: i64) -> Result<Opened, StoreError> {
     }
     if version > 0 && version < LATEST_VERSION {
         // The file as it was, before its schema changes.
-        backup(&conn, dir, now_ms, Some(version))?;
+        backup(&conn, dir, now_ms, &format!("-v{version}"))?;
     }
     configure(&conn)?;
     migrate(&mut conn)?;
@@ -288,24 +288,32 @@ pub fn backups(dir: &Path) -> Result<Vec<(i64, PathBuf)>, StoreError> {
     Ok(found)
 }
 
-/// Copies the database to `backups/kanade-<date>.db` (or
-/// `kanade-<date>-v<version>.db` before a schema change). VACUUM INTO writes
-/// a compact, consistent copy, even with readers at work.
-fn backup(
-    conn: &Connection,
-    dir: &Path,
-    now_ms: i64,
-    before_version: Option<i32>,
-) -> Result<(), StoreError> {
-    let name = match before_version {
-        Some(v) => format!("kanade-{}-v{v}.db", stamp(now_ms)),
-        None => format!("kanade-{}.db", stamp(now_ms)),
-    };
-    let target = dir.join(BACKUP_DIR).join(name);
+/// Copies the database to `backups/kanade-<date><suffix>.db`: no suffix for
+/// the daily copy, `-v<version>` before a schema change, `-update` before an
+/// update installs. VACUUM INTO writes a compact, consistent copy, even with
+/// readers and a writer at work.
+fn backup(conn: &Connection, dir: &Path, now_ms: i64, suffix: &str) -> Result<PathBuf, StoreError> {
+    let target = dir
+        .join(BACKUP_DIR)
+        .join(format!("kanade-{}{suffix}.db", stamp(now_ms)));
     if !target.exists() {
         conn.execute("VACUUM INTO ?1", [target.display().to_string()])?;
     }
-    Ok(())
+    Ok(target)
+}
+
+/// The copy taken before an update installs: the new version may change the
+/// schema, this is the data as the installed one knows it. It sits with the
+/// other backups (`backups/kanade-<date>-update.db`) and is kept like them.
+pub fn backup_before_update(conn: &Connection, now_ms: i64) -> Result<PathBuf, StoreError> {
+    let dir = conn
+        .path()
+        .filter(|path| !path.is_empty())
+        .and_then(|path| Path::new(path).parent())
+        .ok_or_else(|| StoreError::Io {
+            message: "the database is not in a file".to_owned(),
+        })?;
+    backup(conn, dir, now_ms, "-update")
 }
 
 /// The daily backup, then only the newest `BACKUPS_KEPT` are kept.
@@ -314,7 +322,7 @@ fn backup_if_due(conn: &Connection, dir: &Path, now_ms: i64) -> Result<(), Store
         .first()
         .is_none_or(|(taken_ms, _)| now_ms.saturating_sub(*taken_ms) >= BACKUP_EVERY_MS);
     if due {
-        backup(conn, dir, now_ms, None)?;
+        backup(conn, dir, now_ms, "")?;
     }
     for (_, old) in backups(dir)?.into_iter().skip(BACKUPS_KEPT) {
         fs::remove_file(old)?;
