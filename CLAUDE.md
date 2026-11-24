@@ -155,6 +155,17 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
     sinon deux albums nommés par leur dossier ;
   - un dossier « CD2 » donne le disque quand le tag manque ;
   - sans tag d'album : un « Sans album » par artiste.
+- Artistes (`src/lib/artists.ts`, onglet « Artistes ») : tirés des albums.
+  - La liste montre les artistes d'album ; une case ajoute ceux des seuls morceaux
+    (invités, compilations).
+  - « A feat. B » est rangé sous A, B en invité (réglage `groupFeaturing`, activé par
+    défaut). La coupe suit la règle d'Ongaku (ONG-21, `src/lib/featuring.ts`) : seulement
+    « feat », « ft », « featuring », jamais « & » ni une virgule. Garder les deux apps
+    pareilles.
+  - « Various Artists », « VA », « Compilation »… : une seule entrée « Artistes divers »,
+    en fin de liste, après « Artiste inconnu ».
+  - Le dernier départage d'un tri compare les clés code par code (`byCode`) : le
+    collator prend « Strauß » et « Strauss » pour égaux.
 - Pochettes (`library/covers.rs`, `src/lib/covers.ts`) :
   - `track_cover` reçoit un identifiant de morceau et renvoie un JPEG de 400 ou 900 px,
     jamais l'image d'origine ni un chemin ;

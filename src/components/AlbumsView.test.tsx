@@ -448,10 +448,14 @@ describe("Albums", () => {
     expect(albumsTab.getAttribute("aria-selected")).toBe("true");
     expect(await app.screen.findByRole("listbox")).toBeTruthy();
     await app.user.keyboard("{ArrowRight}");
+    const artistsTab = app.screen.getByRole("tab", { name: "Artistes" });
+    expect(document.activeElement).toBe(artistsTab);
+    // Past the last tab, back to the first, and the other way.
+    await app.user.keyboard("{ArrowRight}");
     expect(document.activeElement).toBe(tracksTab);
     await app.user.keyboard("{ArrowLeft}");
-    expect(document.activeElement).toBe(albumsTab);
-    await app.user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(artistsTab);
+    await app.user.keyboard("{ArrowLeft}{Enter}");
     expect(albumsTab.getAttribute("aria-selected")).toBe("true");
   });
 });
