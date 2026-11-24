@@ -5,12 +5,21 @@
 // each test sets itself.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
-import { handleMockCommand, MOCK_NEXT_VERSION, type UpdateScenario } from "./dev/mockBackend";
+import {
+  handleMockCommand,
+  MOCK_NEXT_VERSION,
+  type DatabaseScenario,
+  type UpdateScenario,
+} from "./dev/mockBackend";
 
 const VERSION = "1.2.3";
 
 /** Installs the fake Rust side; returns what the test wants to watch. */
-function backend(scenario: UpdateScenario = "none", version: string | Error = VERSION) {
+function backend(
+  scenario: UpdateScenario = "none",
+  version: string | Error = VERSION,
+  database: DatabaseScenario = "ready",
+) {
   const calls: string[] = [];
   mockIPC((cmd, args) => {
     calls.push(cmd);
@@ -20,7 +29,7 @@ function backend(scenario: UpdateScenario = "none", version: string | Error = VE
     }
     // jsdom cannot navigate: the restart is only recorded.
     if (cmd === "plugin:process|restart") return null;
-    return handleMockCommand(cmd, args, scenario);
+    return handleMockCommand(cmd, args, { update: scenario, database });
   });
   return { calls };
 }
@@ -130,6 +139,56 @@ describe("Settings › Mises à jour", () => {
       { timeout: 3000 },
     );
     expect(calls).toContain("plugin:updater|download_and_install");
+  });
+});
+
+describe("Database banner", () => {
+  it("stays hidden when the database opened normally", async () => {
+    const { calls } = backend();
+    const { screen, waitFor } = await renderApp();
+    await waitFor(() => {
+      expect(calls).toContain("database_status");
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("says nothing when the status cannot be read", async () => {
+    let asked = false;
+    mockIPC((cmd, args) => {
+      if (cmd === "database_status") {
+        asked = true;
+        throw new Error("no such command");
+      }
+      return handleMockCommand(cmd, args);
+    });
+    const { screen, waitFor } = await renderApp();
+    await waitFor(() => {
+      expect(asked).toBe(true);
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("tells a restoration from a backup, and can be closed", async () => {
+    backend("none", VERSION, "restored");
+    const { screen, user } = await renderApp();
+    const banner = await screen.findByRole("alert");
+    expect(banner.textContent).toContain("restaurée depuis la sauvegarde du 23 novembre 2026");
+    await user.click(screen.getByRole("button", { name: "J'ai compris" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("tells a fresh start when no backup could be read", async () => {
+    backend("none", VERSION, "empty");
+    const { screen } = await renderApp();
+    expect((await screen.findByRole("alert")).textContent).toContain("repart d'une base vide");
+  });
+
+  it("keeps an error on screen, with no way to close it", async () => {
+    backend("none", VERSION, "newer");
+    const { screen } = await renderApp();
+    const banner = await screen.findByRole("alert");
+    expect(banner.textContent).toContain("version plus récente de Kanade");
+    expect(screen.queryByRole("button", { name: "J'ai compris" })).toBeNull();
   });
 });
 

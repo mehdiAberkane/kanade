@@ -8,6 +8,8 @@
   --accent-text: #ffffff;
   --ok: #1d7a3a;
   --error: #b3261e;
+  --warning-bg: #fff4d6;
+  --error-bg: #fde7e5;
 
   font-family: "Segoe UI", Inter, Avenir, Helvetica, Arial, sans-serif;
   font-size: 16px;
@@ -30,6 +32,8 @@
     --accent-text: #141414;
     --ok: #6fcf8a;
     --error: #f28b82;
+    --warning-bg: #3d3420;
+    --error-bg: #3f2422;
   }
 }
 
@@ -94,6 +98,29 @@ button {
 .update-btn.busy {
   cursor: default;
   opacity: 0.85;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.6rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.95rem;
+}
+
+.banner span {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.banner-warning {
+  background: var(--warning-bg);
+}
+
+.banner-error {
+  background: var(--error-bg);
+  color: var(--error);
 }
 
 .page {

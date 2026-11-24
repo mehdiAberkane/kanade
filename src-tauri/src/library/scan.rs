@@ -2,17 +2,17 @@
 //! again, moved files keep their track, and files gone or unreadable stay
 //! marked for a while before they leave the index.
 
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use walkdir::WalkDir;
 
 use super::index::{Candidate, Changes, Index, Known, TrackId, TrackStatus};
 use super::track::{FileStamp, Track, is_audio_file, read_track};
+use crate::store::{self, StoreError};
 
 /// Changes written to the index per transaction, so a long first scan saves
 /// its progress as it goes.
@@ -48,7 +48,9 @@ pub struct ScanError {
     pub message: String,
 }
 
-#[derive(Debug)]
+/// Errors the interface shows, each with a stable code it translates.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "code", rename_all = "snake_case")]
 pub enum LibraryError {
     /// The folder is missing or unreachable (unplugged drive, network share
     /// down). The index is left untouched rather than emptied.
@@ -56,7 +58,9 @@ pub enum LibraryError {
         root: String,
         message: String,
     },
-    Index(rusqlite::Error),
+    Database {
+        message: String,
+    },
 }
 
 impl fmt::Display for LibraryError {
@@ -65,7 +69,7 @@ impl fmt::Display for LibraryError {
             Self::RootUnavailable { root, message } => {
                 write!(f, "folder unavailable: {root} ({message})")
             }
-            Self::Index(e) => write!(f, "library index error: {e}"),
+            Self::Database { message } => write!(f, "library database error: {message}"),
         }
     }
 }
@@ -74,16 +78,23 @@ impl std::error::Error for LibraryError {}
 
 impl From<rusqlite::Error> for LibraryError {
     fn from(e: rusqlite::Error) -> Self {
-        Self::Index(e)
+        Self::Database {
+            message: e.to_string(),
+        }
+    }
+}
+
+impl From<StoreError> for LibraryError {
+    fn from(e: StoreError) -> Self {
+        Self::Database {
+            message: e.to_string(),
+        }
     }
 }
 
 /// Brings the index up to date with the audio files under `root`.
 pub fn scan_folder(index: &mut Index, root: &Path) -> Result<ScanReport, LibraryError> {
-    let now_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
-    scan_folder_at(index, root, now_ms)
+    scan_folder_at(index, root, store::now_ms())
 }
 
 /// `scan_folder` at a given time (milliseconds since 1970), for the tests.

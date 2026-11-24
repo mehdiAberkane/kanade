@@ -16,9 +16,9 @@ export default defineConfig((env) =>
         // main.tsx only mounts App; it runs in the real app and the preview.
         exclude: ["src/**/*.test.{ts,tsx}", "src/main.tsx", "src/vite-env.d.ts"],
         reporter: ["text", "html"],
-        // Reached in November 2026, with the component tests: 96.57 / 98.76 /
-        // 94.73 / 96.85 %.
-        thresholds: { statements: 96, branches: 98, functions: 94, lines: 96 },
+        // Reached in November 2026, with the database banner: 97.12 / 99.1 /
+        // 95.74 / 97.41 %.
+        thresholds: { statements: 97, branches: 99, functions: 95, lines: 97 },
       },
     },
   }),

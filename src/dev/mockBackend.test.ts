@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DownloadEvent } from "@tauri-apps/plugin-updater";
-import { handleMockCommand, MOCK_NEXT_VERSION, MOCK_VERSION, updateScenario } from "./mockBackend";
+import {
+  databaseScenario,
+  handleMockCommand,
+  MOCK_NEXT_VERSION,
+  MOCK_VERSION,
+  updateScenario,
+} from "./mockBackend";
 
 describe("handleMockCommand", () => {
   afterEach(() => {
@@ -17,16 +23,35 @@ describe("handleMockCommand", () => {
 
   it("answers the update check for each scenario", async () => {
     expect(handleMockCommand("plugin:updater|check")).toBeNull();
-    expect(handleMockCommand("plugin:updater|check", {}, "available")).toMatchObject({
+    expect(handleMockCommand("plugin:updater|check", {}, { update: "available" })).toMatchObject({
       currentVersion: MOCK_VERSION,
       version: MOCK_NEXT_VERSION,
     });
-    await expect(handleMockCommand("plugin:updater|check", {}, "offline")).rejects.toMatch(
-      /error sending request/,
-    );
-    await expect(handleMockCommand("plugin:updater|check", {}, "unpublished")).rejects.toMatch(
-      /valid release JSON/,
-    );
+    await expect(
+      handleMockCommand("plugin:updater|check", {}, { update: "offline" }),
+    ).rejects.toMatch(/error sending request/);
+    await expect(
+      handleMockCommand("plugin:updater|check", {}, { update: "unpublished" }),
+    ).rejects.toMatch(/valid release JSON/);
+  });
+
+  it("answers the database status for each scenario", () => {
+    expect(handleMockCommand("database_status")).toEqual({ state: "ready" });
+    expect(handleMockCommand("database_status", {}, { database: "restored" })).toMatchObject({
+      state: "restored",
+      backupTakenMs: Date.UTC(2026, 10, 23, 12),
+    });
+    expect(handleMockCommand("database_status", {}, { database: "empty" })).toMatchObject({
+      state: "started_empty",
+    });
+    expect(handleMockCommand("database_status", {}, { database: "newer" })).toEqual({
+      state: "failed",
+      error: { code: "newer_version", found: 3, supported: 2 },
+    });
+    expect(handleMockCommand("database_status", {}, { database: "failed" })).toMatchObject({
+      state: "failed",
+      error: { code: "io" },
+    });
   });
 
   it("plays a whole download on the channel it is given", async () => {
@@ -59,5 +84,18 @@ describe("updateScenario", () => {
   it("is up to date by default or for an unknown value", () => {
     expect(updateScenario("")).toBe("none");
     expect(updateScenario("?update=whatever")).toBe("none");
+  });
+});
+
+describe("databaseScenario", () => {
+  it("reads the scenario from the address", () => {
+    for (const value of ["restored", "empty", "newer", "failed"] as const) {
+      expect(databaseScenario(`?db=${value}`)).toBe(value);
+    }
+  });
+
+  it("is ready by default or for an unknown value", () => {
+    expect(databaseScenario("")).toBe("ready");
+    expect(databaseScenario("?db=whatever")).toBe("ready");
   });
 });

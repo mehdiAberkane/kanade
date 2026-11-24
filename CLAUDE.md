@@ -52,7 +52,9 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   (`npm run dev` sur le port 1430, pour ne pas gêner `tauri dev` sur le 1420). L'entrée est
   dans `.claude/launch.json` du dépôt, et dans celui de `C:\xampp\htdocs` pour les sessions
   ouvertes là. Le faux contrôle des mises à jour se choisit dans l'adresse :
-  `?update=available`, `?update=offline` ou `?update=unpublished` (à jour sinon).
+  `?update=available`, `?update=offline` ou `?update=unpublished` (à jour sinon). L'état
+  de la base aussi : `?db=restored`, `?db=empty`, `?db=newer` ou `?db=failed` (prête
+  sinon). Les deux se combinent (`?update=available&db=restored`).
 - Installeur de test : après chaque fusion sur `main`, le job `installer` de la CI joint
   au run un MSI et un setup `.exe` non signés (artefact `kanade-windows-<commit>`, 30
   jours) ; la commande pour les télécharger est dans le README. Ce job ne tourne pas sur
@@ -105,6 +107,18 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   jamais redonné. Les commandes Rust et l'interface désignent un morceau par cet
   identifiant, jamais par son chemin. Un fichier manquant ou illisible reste dans l'index,
   marqué, pendant 30 jours (`KEEP_GONE_MS`) avant d'en sortir.
+- Base de données (`src-tauri/src/store`) : un seul fichier, `kanade.db`, dans
+  `%LOCALAPPDATA%\fr.devsecopsforce.kanade` (jamais un dossier synchronisé), ouvert au
+  lancement. Tout y est précieux (morceaux et leurs identifiants, puis données de
+  l'utilisateur), donc tout est sauvegardé : une copie par jour dans `backups\`, les 30
+  dernières gardées, plus une copie avant chaque changement de schéma.
+  - **Changer le schéma = ajouter une étape** à `store/migrations.rs` (jamais modifier une
+    étape publiée), avec un test qui part d'une base de la version précédente.
+  - Base abîmée : mise de côté (`kanade-broken-<date>.db`), dernière sauvegarde lisible
+    restaurée, l'interface le dit. Base d'une version plus récente : refusée, intacte.
+  - WAL : une lecture (`store::open_reader`) n'attend pas une écriture en cours.
+  - Les données lourdes et reconstructibles (vignettes, empreintes) iront dans un cache à
+    part, pas dans `kanade.db`.
 - Pas de code `unsafe` dans Kanade : `#![forbid(unsafe_code)]` en tête de `lib.rs` et
   `main.rs`. Il ne se contourne pas avec un `allow`.
 - Icône : la source est `app-icon.svg`. Pour la changer, `npm run tauri icon app-icon.svg`,

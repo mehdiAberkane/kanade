@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { DatabaseBanner } from "./components/DatabaseBanner";
 import { SettingsPage } from "./components/SettingsPage";
 import { statusLine } from "./lib/updater";
 import { useBackgroundUpdateCheck, useUpdater } from "./lib/useUpdater";
@@ -34,6 +35,7 @@ function App() {
         </nav>
         <UpdateButton />
       </header>
+      <DatabaseBanner />
 
       <main>
         {page === "library" ? (
