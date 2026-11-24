@@ -22,11 +22,19 @@ export function SettingsPage({ version }: Props) {
         </p>
         <div className="settings-row">
           {available ? (
-            <button className="btn btn-primary" onClick={() => void install()} disabled={installing}>
+            <button
+              className="btn btn-primary"
+              onClick={() => void install()}
+              disabled={installing}
+            >
               Installer la version {available}
             </button>
           ) : (
-            <button className="btn" onClick={() => void checkNow()} disabled={status.kind === "checking"}>
+            <button
+              className="btn"
+              onClick={() => void checkNow()}
+              disabled={status.kind === "checking"}
+            >
               {status.kind === "checking" ? "Vérification…" : "Vérifier les mises à jour"}
             </button>
           )}
@@ -37,8 +45,8 @@ export function SettingsPage({ version }: Props) {
           )}
         </div>
         <p className="hint">
-          Kanade vérifie aussi tout seul au lancement, puis toutes les 6 heures. L'installation ferme Kanade, met la
-          nouvelle version en place et la relance.
+          Kanade vérifie aussi tout seul au lancement, puis toutes les 6 heures. L'installation
+          ferme Kanade, met la nouvelle version en place et la relance.
         </p>
       </div>
     </section>

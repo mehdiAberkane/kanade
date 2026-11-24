@@ -30,7 +30,8 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Plays a download on the Channel the updater plugin passes as onEvent. */
 async function fakeDownload(args: InvokeArgs | undefined): Promise<null> {
-  const channel = (args as { onEvent?: { onmessage: (event: DownloadEvent) => void } } | undefined)?.onEvent;
+  const channel = (args as { onEvent?: { onmessage: (event: DownloadEvent) => void } } | undefined)
+    ?.onEvent;
   const send = (event: DownloadEvent) => channel?.onmessage(event);
   send({ event: "Started", data: { contentLength: FAKE_SIZE } });
   for (let i = 0; i < FAKE_CHUNKS; i++) {
@@ -42,20 +43,28 @@ async function fakeDownload(args: InvokeArgs | undefined): Promise<null> {
 }
 
 /** Answers a Rust command the way the real backend would, with sample data. */
-export function handleMockCommand(cmd: string, args?: InvokeArgs, scenario: UpdateScenario = "none"): unknown {
+export function handleMockCommand(
+  cmd: string,
+  args?: InvokeArgs,
+  scenario: UpdateScenario = "none",
+): unknown {
   switch (cmd) {
     case "app_version":
       return MOCK_VERSION;
 
     // Tauri's updater plugin (src/lib/useUpdater.ts). The real one rejects
-    // with a message string, like these.
+    // with a message string, like these, hence the lint exceptions.
     case "plugin:updater|check":
       switch (scenario) {
         case "available":
           return { rid: 1, currentVersion: MOCK_VERSION, version: MOCK_NEXT_VERSION, rawJson: {} };
         case "offline":
-          return Promise.reject("error sending request for url (https://github.com/mehdiAberkane/kanade/releases/latest/download/latest.json)");
+          // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+          return Promise.reject(
+            "error sending request for url (https://github.com/mehdiAberkane/kanade/releases/latest/download/latest.json)",
+          );
         case "unpublished":
+          // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
           return Promise.reject("Could not fetch a valid release JSON from the remote");
         default:
           return null;

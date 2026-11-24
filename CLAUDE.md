@@ -27,8 +27,15 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   `rustup component add llvm-tools-preview` puis
   `cargo install cargo-llvm-cov --locked --version 0.9.2`.
 - Typage : `npm run typecheck`
-- Lint / format : `npm run lint`, puis dans `src-tauri` : `cargo fmt` et
-  `cargo clippy --locked --all-targets -- -D warnings`
+- Lint / format : `npm run lint` et `npm run format` (Prettier ; la CI lance
+  `npm run format:check`), puis dans `src-tauri` : `cargo fmt` et
+  `cargo clippy --locked --all-targets -- -D warnings`.
+  - ESLint lit les types (`strictTypeChecked`) et vérifie l'accessibilité
+    (`eslint-plugin-jsx-a11y-x`, le fork : l'original ne supporte pas encore ESLint 10 ;
+    son minimatch est forcé en version corrigée par `overrides` dans `package.json`).
+    Pas de `eslint-disable` sans un commentaire qui dit pourquoi.
+  - Clippy ajoute quelques règles `pedantic` choisies, dans `[lints.clippy]` de
+    `src-tauri/Cargo.toml` (conversions de nombres, copies inutiles, lisibilité).
 - Crates Rust (failles, licences, sources, doublons) : `cargo deny --locked check` dans
   `src-tauri`, réglé par `src-tauri/deny.toml`. Une nouvelle crate sous une licence
   absente de la liste fait échouer la CI : demande-moi avant de l'ajouter. Installer

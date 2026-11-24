@@ -21,7 +21,9 @@ describe("handleMockCommand", () => {
       currentVersion: MOCK_VERSION,
       version: MOCK_NEXT_VERSION,
     });
-    await expect(handleMockCommand("plugin:updater|check", {}, "offline")).rejects.toMatch(/error sending request/);
+    await expect(handleMockCommand("plugin:updater|check", {}, "offline")).rejects.toMatch(
+      /error sending request/,
+    );
     await expect(handleMockCommand("plugin:updater|check", {}, "unpublished")).rejects.toMatch(
       /valid release JSON/,
     );
@@ -38,7 +40,10 @@ describe("handleMockCommand", () => {
     const started = events[0];
     expect(started.event).toBe("Started");
     const total = started.event === "Started" ? started.data.contentLength : 0;
-    const downloaded = events.reduce((sum, e) => sum + (e.event === "Progress" ? e.data.chunkLength : 0), 0);
+    const downloaded = events.reduce(
+      (sum, e) => sum + (e.event === "Progress" ? e.data.chunkLength : 0),
+      0,
+    );
     expect(downloaded).toBe(total);
     expect(events[events.length - 1]).toEqual({ event: "Finished" });
   });

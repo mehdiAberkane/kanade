@@ -3,5 +3,5 @@
 #![forbid(unsafe_code)]
 
 fn main() {
-    kanade_lib::run()
+    kanade_lib::run();
 }

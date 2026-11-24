@@ -29,7 +29,7 @@ gh run download (gh run list -R mehdiAberkane/kanade -w CI -b main -e push -s su
 ## Tester
 
 ```bash
-npm run typecheck && npm run lint && npm test
+npm run typecheck && npm run lint && npm run format:check && npm test
 npm run build          # Rust embarque l'interface construite
 cd src-tauri && cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked
 cargo deny --locked check   # failles, licences et sources des crates (deny.toml)
