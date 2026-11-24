@@ -1,8 +1,8 @@
 # Checks every push to main and every pull request, in parallel:
 # - interface, on Ubuntu (faster to start): types, lint, formatting, tests
-#   with coverage thresholds, npm audit;
+#   with coverage thresholds, npm audit, unused code (knip);
 # - rust, on Windows (the platform Kanade runs on): format, Clippy, tests with
-#   a coverage threshold, cargo-deny;
+#   a coverage threshold, cargo-deny, unused crates (cargo-machete);
 # - workflows: an audit of the workflows themselves (zizmor);
 # - dependency-review, on pull requests: the new dependencies;
 # - installer, after a merge on main only: the packaged app as an artifact.
@@ -57,6 +57,11 @@ jobs:
       - name: npm dependency audit
         run: npm audit --audit-level=high
 
+      # Files, exports and npm dependencies nothing uses (knip finds the entry
+      # points through Vite, Vitest, ESLint and the package.json scripts).
+      - name: Unused code and dependencies (knip)
+        run: npm run knip
+
   rust:
     # Windows: the platform Kanade runs on, and Tauri builds there without
     # extra system packages.
@@ -81,7 +86,7 @@ jobs:
           workspaces: src-tauri -> target
           # Part of the cache key. rust-cache saves nothing when an entry with
           # the same key exists, and the key only follows Cargo.toml/Cargo.lock
-          # and the toolchain: a newly installed tool (cargo-deny,
+          # and the toolchain: a newly installed tool (cargo-deny, cargo-machete,
           # cargo-llvm-cov) or a new build (target/llvm-cov-target) is only
           # kept once the key changes. Bump it in that case.
           key: v1
@@ -125,6 +130,17 @@ jobs:
         run: |
           [ "$(cargo deny --version 2>/dev/null)" = "cargo-deny 0.22.0" ] || cargo install cargo-deny --locked --version 0.22.0
           cargo deny --locked check
+
+      # Crates declared in Cargo.toml that the code never uses. It reads the
+      # sources as text: a crate used only by a macro's generated code must be
+      # listed in [package.metadata.cargo-machete] ignored. The binary is
+      # cached by rust-cache; raise the version here to update it.
+      - name: Unused Rust dependencies (cargo-machete)
+        working-directory: src-tauri
+        shell: bash
+        run: |
+          [ "$(cargo machete --version 2>/dev/null)" = "0.10.1" ] || cargo install cargo-machete --locked --version 0.10.1
+          cargo machete
 
   # After each merge on main: the whole app, packaged (MSI and setup .exe),
   # attached to the run (Summary › Artifacts) to try a card in « A verifier »

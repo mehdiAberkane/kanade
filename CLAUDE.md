@@ -40,6 +40,13 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   `src-tauri`, réglé par `src-tauri/deny.toml`. Une nouvelle crate sous une licence
   absente de la liste fait échouer la CI : demande-moi avant de l'ajouter. Installer
   l'outil : `cargo install cargo-deny --locked --version 0.22.0`, la version de la CI.
+- Code et dépendances inutilisés : `npm run knip` (fichiers, exports et paquets npm), puis
+  `cargo machete` dans `src-tauri` (crates déclarées mais jamais utilisées ; outil :
+  `cargo install cargo-machete --locked --version 0.10.1`). La CI échoue sur chacun :
+  supprime ce qui ne sert plus. cargo-machete lit le code comme du texte ; une crate
+  utilisée seulement par le code qu'une macro génère (comme `serde_json` pour
+  `generate_context!`) se garde avec un commentaire, ou va dans
+  `[package.metadata.cargo-machete] ignored` si elle n'apparaît nulle part.
 - Lancer en local : `npm run tauri dev`
 - Interface seule dans le navigateur intégré de Claude : `preview_start` avec `kanade-web`
   (`npm run dev` sur le port 1430, pour ne pas gêner `tauri dev` sur le 1420). L'entrée est

@@ -33,8 +33,6 @@ export interface UpdaterState {
   status: UpdateStatus;
 }
 
-export type Updater = ReturnType<typeof createUpdater>;
-
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export function createUpdater(source: UpdateSource) {
