@@ -1,29 +1,10 @@
-import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { useLibraries } from "../lib/useLibraries";
-import { errorText, type Library } from "../lib/libraries";
+import { useAddLibrary, useLibraries } from "../lib/useLibraries";
 import { LibraryCard } from "./LibraryCard";
 
-/**
- * The folders Kanade follows. The folder picker opens on the Rust side: the
- * interface asks for one, it never gives a path.
- */
+/** The folders Kanade follows, and what can be done with each. */
 export function LibrariesPage() {
   const { libraries, error } = useLibraries();
-  const [adding, setAdding] = useState(false);
-  const [refusal, setRefusal] = useState<string | null>(null);
-
-  async function add() {
-    setAdding(true);
-    setRefusal(null);
-    try {
-      await invoke<Library | null>("library_add");
-    } catch (e) {
-      setRefusal(errorText(e));
-    } finally {
-      setAdding(false);
-    }
-  }
+  const { add, adding, refusal } = useAddLibrary();
 
   const addButton = (
     <button className="btn btn-primary" onClick={() => void add()} disabled={adding}>

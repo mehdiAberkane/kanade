@@ -63,6 +63,7 @@ export type LibraryError =
   | { code: "contains_library"; name: string }
   | { code: "not_found" }
   | { code: "empty_name" }
+  | { code: "track_not_found" }
   | { code: "io"; message: string }
   | { code: "database"; message: string };
 
@@ -80,6 +81,8 @@ export interface DropReport {
 
 export interface Settings {
   scanOnStartup: boolean;
+  /** « The Beatles » sorted under B. */
+  ignoreArticles: boolean;
 }
 
 /** The events the Rust side sends (commands.rs). */
@@ -124,6 +127,8 @@ export function errorText(error: unknown): string {
       return "Cette bibliothèque n'existe plus.";
     case "empty_name":
       return "Une bibliothèque a besoin d'un nom.";
+    case "track_not_found":
+      return "Ce morceau n'est plus dans Kanade.";
     case "io":
       return `Impossible d'écrire le fichier : ${error.message}`;
     case "database":

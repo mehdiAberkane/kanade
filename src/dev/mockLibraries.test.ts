@@ -122,7 +122,7 @@ describe("fake libraries", () => {
   it("removes a library while its scan runs", async () => {
     setup();
     await invoke("library_scan", { id: 1, readOnlineOnly: false });
-    expect(await invoke("library_remove", { id: 1 })).toBe(12_480);
+    expect(await invoke("library_remove", { id: 1 })).toBe(45_945);
     expect((await list()).map((l) => l.name)).toEqual(["Disque externe", "OneDrive"]);
   });
 
@@ -134,11 +134,45 @@ describe("fake libraries", () => {
   });
 });
 
+describe("fake tracks", () => {
+  it("lists the tracks of each library, the same at each call", async () => {
+    setup();
+    const rows = await invoke<unknown[][]>("tracks_list");
+    expect(rows).toHaveLength(50_000);
+    expect(await invoke<unknown[][]>("tracks_list")).toEqual(rows);
+    const libraries = new Set(rows.map((r) => r[1]));
+    expect([...libraries].sort()).toEqual([1, 2, 3]);
+    // A few files gone or damaged, and some without tags.
+    expect(rows.some((r) => r[2] === 2)).toBe(true);
+    expect(rows.some((r) => r[2] === 1)).toBe(true);
+    expect(rows.some((r) => r[6] === null)).toBe(true);
+    expect(rows.some((r) => String(r[8]).includes("Vol."))).toBe(true);
+  });
+
+  it("shows a known track, refuses an unknown one", async () => {
+    setup();
+    const [first] = await invoke<number[][]>("tracks_list");
+    expect(await invoke("track_reveal", { id: first[0] })).toBeNull();
+    await expect(invoke("track_reveal", { id: -1 })).rejects.toEqual({ code: "track_not_found" });
+  });
+
+  it("keeps the columns of the list, and the settings changed", async () => {
+    setup();
+    expect(await invoke("track_view_get")).toBeNull();
+    const view = { columns: [{ id: "title", width: 300, visible: true }], sort: null };
+    expect(await invoke("track_view_set", { view })).toEqual(view);
+    expect(await invoke("track_view_get")).toEqual(view);
+    expect(await invoke("track_view_set", {})).toBeNull();
+    await invoke("settings_set", { settings: { ignoreArticles: false } });
+    expect(await invoke("settings_get")).toEqual({ scanOnStartup: true, ignoreArticles: false });
+  });
+});
+
 describe("installMockBackend", () => {
   it("answers from the libraries chosen in the address", async () => {
     window.history.replaceState(null, "", "/?libraries=empty");
     installMockBackend();
     expect(await list()).toEqual([]);
-    expect(await invoke("settings_get")).toEqual({ scanOnStartup: true });
+    expect(await invoke("settings_get")).toEqual({ scanOnStartup: true, ignoreArticles: true });
   });
 });
