@@ -2,13 +2,14 @@
 // of tracks (tracks.ts), from the same rows. An album is a title and an
 // album artist, compared without case nor accents:
 // - with no album artist in its tags, the track artist when the folder has
-//   only one, else « Artistes divers »;
+//   only one (« A feat. B » counting as A), else « Artistes divers »;
 // - a different year makes another album (a reissue);
 // - two folders make one album when their disc and track numbers do not
 //   overlap (CD1 and CD2), two albums otherwise (a copy, another edition),
 //   each named by its folder;
 // - tracks without an album tag: one « Sans album » per artist.
-import { collator, searchable, withoutArticle, type Track } from "./tracks";
+import { splitFeaturing } from "./featuring";
+import { byCode, collator, searchable, withoutArticle, type Track } from "./tracks";
 
 export const VARIOUS_ARTISTS = "Artistes divers";
 export const UNKNOWN_ARTIST = "Artiste inconnu";
@@ -171,7 +172,12 @@ function makeUnit(tracks: Track[], keyOf: (text: string) => string): Unit {
   let artist = mostFrequent(tracks.map((t) => t.albumArtist?.trim() || null));
   if (artist === null) {
     const artists = new Map<string, string>();
-    for (const t of tracks) if (t.artist?.trim()) artists.set(keyOf(t.artist), t.artist);
+    // « A feat. B » is still A: one guest does not make a compilation.
+    for (const t of tracks) {
+      if (!t.artist?.trim()) continue;
+      const { main } = splitFeaturing(t.artist);
+      artists.set(keyOf(main), main);
+    }
     artist =
       artists.size === 0
         ? UNKNOWN_ARTIST
@@ -362,7 +368,7 @@ export function sortAlbums(albums: Album[], sort: AlbumSort, ignoreArticles: boo
       text(artistOf(a), artistOf(b)) ||
       number(a.year, b.year, 1) ||
       text(a.title, b.title) ||
-      collator.compare(a.key, b.key),
+      byCode(a.key, b.key),
   );
 }
 

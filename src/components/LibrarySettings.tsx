@@ -6,7 +6,7 @@ interface Props {
   save: (change: Partial<Settings>) => Promise<void>;
 }
 
-/** Réglages › Bibliothèques and › Liste des morceaux. */
+/** Réglages › Bibliothèques, › Liste des morceaux and › Artistes. */
 export function LibrarySettings({ settings, save }: Props) {
   return (
     <>
@@ -39,6 +39,23 @@ export function LibrarySettings({ settings, save }: Props) {
           Ignorer les articles pour trier (« The Beatles » à B, « Les Rita Mitsouko » à R)
         </label>
         <p className="hint">Articles ignorés : The, A, An, Le, La, Les, L'.</p>
+      </div>
+
+      <div className="settings-section">
+        <h2>Artistes</h2>
+        <label className="settings-row">
+          <input
+            type="checkbox"
+            checked={settings?.groupFeaturing ?? false}
+            disabled={!settings}
+            onChange={(event) => void save({ groupFeaturing: event.target.checked })}
+          />
+          Ranger « A feat. B » sous A, avec B comme artiste invité
+        </label>
+        <p className="hint">
+          Seuls « feat. », « ft. » et « featuring » séparent deux artistes : « Simon & Garfunkel »
+          ou « Earth, Wind & Fire » restent un seul nom.
+        </p>
       </div>
     </>
   );

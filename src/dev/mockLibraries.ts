@@ -225,7 +225,12 @@ export function createMockLibraries({
   const entries: Entry[] = scenario === "empty" ? [] : sample(Date.now());
   let nextId = entries.length + 1;
   let picks = 0;
-  let settings: Settings = { scanOnStartup: true, ignoreArticles: true, checkUpdates: true };
+  let settings: Settings = {
+    scanOnStartup: true,
+    ignoreArticles: true,
+    checkUpdates: true,
+    groupFeaturing: true,
+  };
   let view: TrackView | null = null;
   let albumView: AlbumView | null = null;
   const now = Date.now();

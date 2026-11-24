@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mockTracks } from "../dev/mockTracks";
 import {
+  byCode,
   clickRow,
   columnById,
   COLUMNS,
@@ -376,5 +377,13 @@ describe("totals", () => {
     expect(plain(statusLine({ count: 12_480, durationMs: 0, size: 0 }, list))).toBe(
       "2 sélectionnés sur 12 480 morceaux · 3:00 · 3 octets",
     );
+  });
+});
+
+describe("byCode", () => {
+  it("orders texts the collator takes as equal, code point by code point", () => {
+    expect(byCode("strauss", "strauß")).toBe(-1);
+    expect(byCode("strauß", "strauss")).toBe(1);
+    expect(byCode("a", "a")).toBe(0);
   });
 });

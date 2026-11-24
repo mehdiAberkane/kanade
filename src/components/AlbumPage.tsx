@@ -19,13 +19,15 @@ interface Props {
   /** Libraries offline: their tracks are greyed. */
   offline: Set<number>;
   onBack: () => void;
+  /** Where « ‹ » goes back to: the albums, or the artist it was opened from. */
+  backLabel?: string;
 }
 
 /**
  * One album: its cover, what it is made of, its tracks disc by disc, and
  * the numbers missing among them. « ‹ Albums » or Escape goes back.
  */
-export function AlbumPage({ album, offline, onBack }: Props) {
+export function AlbumPage({ album, offline, onBack, backLabel = "Albums" }: Props) {
   const back = useRef<HTMLButtonElement>(null);
   const [status, setStatus] = useState<string | null>(null);
   const missing = missingTracks(album);
@@ -69,7 +71,7 @@ export function AlbumPage({ album, offline, onBack }: Props) {
   return (
     <article className="album-page" aria-labelledby="album-heading">
       <button ref={back} type="button" className="btn album-back" onClick={onBack}>
-        ‹ Albums
+        ‹ {backLabel}
       </button>
       <header className="album-header">
         <Cover album={album} size={220} large />

@@ -623,7 +623,12 @@ mod tests {
 
         assert_eq!(
             invoke(&webview, "settings_get", serde_json::json!({})).unwrap(),
-            serde_json::json!({ "scanOnStartup": true, "ignoreArticles": true, "checkUpdates": true })
+            serde_json::json!({
+                "scanOnStartup": true,
+                "ignoreArticles": true,
+                "checkUpdates": true,
+                "groupFeaturing": true
+            })
         );
         invoke(
             &webview,
@@ -633,7 +638,12 @@ mod tests {
         .unwrap();
         assert_eq!(
             invoke(&webview, "settings_get", serde_json::json!({})).unwrap(),
-            serde_json::json!({ "scanOnStartup": false, "ignoreArticles": true, "checkUpdates": false })
+            serde_json::json!({
+                "scanOnStartup": false,
+                "ignoreArticles": true,
+                "checkUpdates": false,
+                "groupFeaturing": true
+            })
         );
 
         // Before an update installs: a copy of the database, with the others.

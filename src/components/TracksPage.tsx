@@ -5,19 +5,24 @@ import { sortTracks, type Context } from "../lib/tracks";
 import { useAddLibrary, useLibraries } from "../lib/useLibraries";
 import { useTracks, useTrackView } from "../lib/useTracks";
 import { AlbumsView } from "./AlbumsView";
+import { ArtistsView } from "./ArtistsView";
 import { TrackTable } from "./TrackTable";
 
 const BADGES = { scanning: "scan", queued: "en attente", offline: "hors ligne", idle: null };
 
 const ALL = "Toute la musique";
-type Tab = "tracks" | "albums";
-const TABS: Tab[] = ["tracks", "albums"];
-const TAB_LABELS: Record<Tab, string> = { tracks: "Morceaux", albums: "Albums" };
+type Tab = "tracks" | "albums" | "artists";
+const TABS: Tab[] = ["tracks", "albums", "artists"];
+const TAB_LABELS: Record<Tab, string> = {
+  tracks: "Morceaux",
+  albums: "Albums",
+  artists: "Artistes",
+};
 
 /**
  * The music: « Toute la musique » and each library on the left; on the
- * right, the tracks or the albums of the one chosen. The libraries are
- * managed on their own page.
+ * right, the tracks, the albums or the artists of the one chosen. The
+ * libraries are managed on their own page.
  */
 export function TracksPage({ onManage }: { onManage: () => void }) {
   const [tab, setTab] = useState<Tab>("tracks");
@@ -27,14 +32,18 @@ export function TracksPage({ onManage }: { onManage: () => void }) {
   const { add, adding, refusal } = useAddLibrary();
   const [chosen, setChosen] = useState<number | null>(null);
   const [ignoreArticles, setIgnoreArticles] = useState(true);
+  const [groupFeaturing, setGroupFeaturing] = useState(true);
+  /** The track-only artists listed too: kept while the page lives. */
+  const [allArtists, setAllArtists] = useState(false);
 
   useEffect(() => {
     invoke<Settings>("settings_get").then(
       (settings) => {
         setIgnoreArticles(settings.ignoreArticles);
+        setGroupFeaturing(settings.groupFeaturing);
       },
       () => {
-        // Not read: the default, articles ignored.
+        // Not read: the defaults, articles ignored and « feat. » grouped.
       },
     );
   }, []);
@@ -115,6 +124,22 @@ export function TracksPage({ onManage }: { onManage: () => void }) {
         ignoreArticles={ignoreArticles}
         offline={offline}
         label={`Albums : ${label}`}
+      />
+    );
+  } else if (tab === "artists") {
+    main = (
+      <ArtistsView
+        key={libraryId ?? "all"}
+        tracks={inLibrary}
+        ignoreArticles={ignoreArticles}
+        groupFeaturing={groupFeaturing}
+        showAll={allArtists}
+        onShowAll={setAllArtists}
+        offline={offline}
+        label={`Artistes : ${label}`}
+        view={view}
+        onView={update}
+        context={context}
       />
     );
   } else {

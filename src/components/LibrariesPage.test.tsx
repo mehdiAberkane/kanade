@@ -379,7 +379,14 @@ describe("Settings › Bibliothèques", () => {
     expect((box as HTMLInputElement).checked).toBe(false);
     expect(calls).toContainEqual({
       cmd: "settings_set",
-      args: { settings: { scanOnStartup: false, ignoreArticles: true, checkUpdates: true } },
+      args: {
+        settings: {
+          scanOnStartup: false,
+          ignoreArticles: true,
+          checkUpdates: true,
+          groupFeaturing: true,
+        },
+      },
     });
   });
 
@@ -395,7 +402,14 @@ describe("Settings › Bibliothèques", () => {
     await app.user.click(box);
     expect(calls).toContainEqual({
       cmd: "settings_set",
-      args: { settings: { scanOnStartup: true, ignoreArticles: false, checkUpdates: true } },
+      args: {
+        settings: {
+          scanOnStartup: true,
+          ignoreArticles: false,
+          checkUpdates: true,
+          groupFeaturing: true,
+        },
+      },
     });
   });
 

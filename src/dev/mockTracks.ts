@@ -84,8 +84,10 @@ export function mockTracks(
 ): TrackRow[] {
   const pick = random(libraryId * 7919);
   const rows: TrackRow[] = [];
+  const someone = () =>
+    `${PREFIXES[pick(PREFIXES.length)]}${NOUNS[pick(NOUNS.length)]} ${ADJECTIVES[pick(ADJECTIVES.length)]}`;
   while (rows.length < count) {
-    const artist = `${PREFIXES[pick(PREFIXES.length)]}${NOUNS[pick(NOUNS.length)]} ${ADJECTIVES[pick(ADJECTIVES.length)]}`;
+    const artist = someone();
     const volume = pick(5) === 0 ? ` Vol. ${1 + pick(12)}` : "";
     const album = `${capital(WORDS[pick(WORDS.length)])} ${WORDS[pick(WORDS.length)]}${volume}`;
     const year = 1965 + pick(62);
@@ -97,13 +99,20 @@ export function mockTracks(
     const bitrate = format === "FLAC" ? 800 + pick(300) : 192 + pick(129);
     // Most albums have a cover in their tags; some only a cover.jpg, some none.
     const covered = pick(6) !== 0;
+    // Now and then a compilation, whose tracks are each someone else's.
+    const compilation = pick(15) === 0;
+    const albumArtist = compilation ? "Various Artists" : artist;
+    const folder = compilation ? "Compilations" : artist;
     for (let number = 1; number <= length; number++) {
       const id = libraryId * 1_000_000 + rows.length + 1;
       const title = numbered
         ? `Piste ${number}`
         : `${capital(WORDS[pick(WORDS.length)])} ${WORDS[pick(WORDS.length)]}`;
       const durationMs = (120 + pick(330)) * 1000 + pick(1000);
-      const path = `${root}\\${artist}\\${year} - ${album}\\${pad(number)} - ${title}.${extension}`;
+      const path = `${root}\\${folder}\\${year} - ${album}\\${pad(number)} - ${title}.${extension}`;
+      // A guest on a track now and then: « A feat. B ».
+      const guest = pick(14) === 0 ? ` feat. ${someone()}` : "";
+      const performer = (compilation ? someone() : artist) + guest;
       // Now and then: no tags, a file gone, a damaged one.
       const untagged = id % 211 === 0;
       const status = id % 997 === 0 ? 2 : id % 1499 === 0 ? 1 : 0;
@@ -114,8 +123,8 @@ export function mockTracks(
         status === 0 ? null : now - (1 + pick(20)) * 86_400_000,
         path,
         untagged || status === 1 ? `${pad(number)} - ${title}` : title,
-        untagged ? null : artist,
-        untagged ? null : artist,
+        untagged ? null : performer,
+        untagged ? null : albumArtist,
         untagged ? null : album,
         untagged ? null : number,
         untagged ? null : 1,

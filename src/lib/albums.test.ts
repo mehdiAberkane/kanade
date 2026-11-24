@@ -85,6 +85,14 @@ describe("groupAlbums", () => {
     ]);
   });
 
+  it("keeps an album with a guest on one track its artist's, not a compilation", () => {
+    const albums = groupAlbums([
+      track("Animal", { album: "Animal", artist: "Ke$ha", track: 1 }),
+      track("Animal", { album: "Animal", artist: "Ke$ha feat. 3OH!3", track: 2 }),
+    ]);
+    expect(sortedNames(albums)).toEqual(["Animal / Ke$ha / 1959: 2"]);
+  });
+
   it("separates a reissue by its year, and an undated folder joins the only year", () => {
     expect(
       sortedNames(groupAlbums([...numbered("1959", 3), ...numbered("2009", 3, { year: 2009 })])),

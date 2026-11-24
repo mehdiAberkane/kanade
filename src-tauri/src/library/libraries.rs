@@ -156,6 +156,8 @@ pub struct Settings {
     /// Look for a new version on GitHub after launch, then every 6 hours: on
     /// by default. The button in the settings works either way.
     pub check_updates: bool,
+    /// File « A feat. B » under A, with B as a guest: on by default.
+    pub group_featuring: bool,
 }
 
 impl Default for Settings {
@@ -164,6 +166,7 @@ impl Default for Settings {
             scan_on_startup: true,
             ignore_articles: true,
             check_updates: true,
+            group_featuring: true,
         }
     }
 }
@@ -171,6 +174,7 @@ impl Default for Settings {
 const SCAN_ON_STARTUP: &str = "scan_on_startup";
 const IGNORE_ARTICLES: &str = "ignore_articles";
 const CHECK_UPDATES: &str = "check_updates";
+const GROUP_FEATURING: &str = "group_featuring";
 
 impl Index {
     /// Every library, by name.
@@ -381,6 +385,7 @@ impl Index {
             scan_on_startup: on(SCAN_ON_STARTUP)?,
             ignore_articles: on(IGNORE_ARTICLES)?,
             check_updates: on(CHECK_UPDATES)?,
+            group_featuring: on(GROUP_FEATURING)?,
         })
     }
 
@@ -390,6 +395,7 @@ impl Index {
             (SCAN_ON_STARTUP, settings.scan_on_startup),
             (IGNORE_ARTICLES, settings.ignore_articles),
             (CHECK_UPDATES, settings.check_updates),
+            (GROUP_FEATURING, settings.group_featuring),
         ] {
             tx.execute(
                 "INSERT INTO settings (key, value) VALUES (?1, ?2) \
@@ -888,10 +894,12 @@ mod tests {
         assert!(Settings::default().scan_on_startup);
         assert!(Settings::default().ignore_articles);
         assert!(Settings::default().check_updates);
+        assert!(Settings::default().group_featuring);
         let off = Settings {
             scan_on_startup: false,
             ignore_articles: false,
             check_updates: false,
+            group_featuring: false,
         };
         index.save_settings(&off).unwrap();
         assert_eq!(index.settings().unwrap(), off);
@@ -899,6 +907,7 @@ mod tests {
             scan_on_startup: true,
             ignore_articles: false,
             check_updates: false,
+            group_featuring: true,
         };
         index.save_settings(&mixed).unwrap();
         assert_eq!(index.settings().unwrap(), mixed);
@@ -945,11 +954,17 @@ mod tests {
                 scan_on_startup: false,
                 ignore_articles: true,
                 check_updates: true,
+                group_featuring: true,
             }
         );
         assert_eq!(
             serde_json::to_value(Settings::default()).unwrap(),
-            serde_json::json!({ "scanOnStartup": true, "ignoreArticles": true, "checkUpdates": true })
+            serde_json::json!({
+                "scanOnStartup": true,
+                "ignoreArticles": true,
+                "checkUpdates": true,
+                "groupFeaturing": true
+            })
         );
     }
 }
