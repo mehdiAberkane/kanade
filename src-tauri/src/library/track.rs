@@ -16,6 +16,7 @@ use std::time::UNIX_EPOCH;
 use lofty::config::{GlobalOptions, ParseOptions, ParsingMode, apply_global_options};
 use lofty::error::AllocationError;
 use lofty::file::{FileType, TaggedFile};
+use lofty::picture::PictureType;
 use lofty::prelude::*;
 use lofty::probe::Probe;
 use lofty::tag::{ItemKey, Tag};
@@ -228,6 +229,19 @@ pub fn read_track(path: &Path, stamp: FileStamp) -> Result<Track, ReadError> {
         fill_from_tag(&mut track, tag);
     }
     Ok(track)
+}
+
+/// The cover in a file's tags: the front cover, or else the first picture.
+/// None when the file has none, cannot be read, or holds one bigger than
+/// `ALLOCATION_LIMIT` (lofty refuses it).
+pub fn read_cover(path: &Path) -> Option<Vec<u8>> {
+    configure_lofty();
+    let tagged = parse(path, true).ok()?;
+    let pictures = || tagged.tags().iter().flat_map(Tag::pictures);
+    pictures()
+        .find(|p| p.pic_type() == PictureType::CoverFront)
+        .or_else(|| pictures().next())
+        .map(|p| p.data().to_vec())
 }
 
 struct ParseFailure {

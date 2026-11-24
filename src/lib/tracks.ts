@@ -25,6 +25,7 @@ export type TrackRow = [
   size: number,
   addedMs: number | null,
   modifiedMs: number,
+  hasCover: boolean,
 ];
 
 type TrackStatus = "present" | "unreadable" | "missing";
@@ -50,6 +51,8 @@ export interface Track {
   size: number;
   addedMs: number | null;
   modifiedMs: number;
+  /** Its tags hold a picture: an album's cover comes from such a track. */
+  hasCover: boolean;
 }
 
 const STATUSES: TrackStatus[] = ["present", "unreadable", "missing"];
@@ -75,6 +78,7 @@ export function fromRow(row: TrackRow): Track {
     size: row[16],
     addedMs: row[17],
     modifiedMs: row[18],
+    hasCover: row[19],
   };
 }
 
@@ -294,7 +298,7 @@ export function completeView(view: TrackView | null): TrackView {
 // --- Sort ---------------------------------------------------------------
 
 /** Accents and case aside, numbers in natural order (« Piste 2 » before « Piste 10 »). */
-const collator = new Intl.Collator("fr", { numeric: true, sensitivity: "base" });
+export const collator = new Intl.Collator("fr", { numeric: true, sensitivity: "base" });
 
 const ARTICLE = /^(?:(?:the|an?|le|la|les)\s+|l['’]\s*)(?=\S)/i;
 
@@ -390,8 +394,8 @@ export function sortTracks(tracks: Track[], sort: SortPref | null, options: Sort
 
 // --- Type to jump -------------------------------------------------------
 
-/** For « taper des lettres » : no accents, no case. */
-function searchable(text: string): string {
+/** For « taper des lettres » and the album keys: no accents, no case. */
+export function searchable(text: string): string {
   return text
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")

@@ -17,9 +17,14 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State, WebviewWindow, Window, WindowEvent};
 
 use crate::library::{
-    DropReport, Library, LibraryError, LibraryId, LibraryService, LibraryView, RevealTarget,
-    ScanErrors, ScanEvents, ScanProgress, Settings, TrackId, TrackRow, TrackView,
+    AlbumView, CoverSize, DropReport, Library, LibraryError, LibraryId, LibraryService,
+    LibraryView, RevealTarget, ScanErrors, ScanEvents, ScanProgress, Settings, TrackId, TrackRow,
+    TrackView,
 };
+
+/// The folder of the covers' thumbnails, apart from the database
+/// (`%LOCALAPPDATA%\fr.devsecopsforce.kanade\cache\covers`).
+pub struct Covers(pub PathBuf);
 
 /// The libraries list or their scans changed: the interface reads it again.
 const LIBRARIES_CHANGED: &str = "libraries-changed";
@@ -243,6 +248,20 @@ pub fn backup_before_update(libraries: State<'_, Libraries>) -> Result<(), Libra
     backup(&libraries)
 }
 
+/// The cover of a track, for the albums: JPEG bytes, none (empty) when
+/// neither its tags nor its folder hold one. By the track's id: the
+/// interface never sees the image's path nor the original image.
+#[tauri::command(async)]
+pub fn track_cover(
+    id: TrackId,
+    size: CoverSize,
+    libraries: State<'_, Libraries>,
+    covers: State<'_, Covers>,
+) -> Result<tauri::ipc::Response, LibraryError> {
+    let jpeg = libraries.get()?.cover(id, size, &covers.0)?;
+    Ok(tauri::ipc::Response::new(jpeg))
+}
+
 /// Every track of every library, for the list.
 #[tauri::command(async)]
 pub fn tracks_list(libraries: State<'_, Libraries>) -> Result<Vec<TrackRow>, LibraryError> {
@@ -281,6 +300,20 @@ pub fn track_view_set(
     libraries: State<'_, Libraries>,
 ) -> Result<TrackView, LibraryError> {
     libraries.get()?.save_track_view(view)
+}
+
+/// The albums' grid: its sort and tile size, as last left.
+#[tauri::command(async)]
+pub fn album_view_get(libraries: State<'_, Libraries>) -> Result<Option<AlbumView>, LibraryError> {
+    libraries.get()?.album_view()
+}
+
+#[tauri::command(async)]
+pub fn album_view_set(
+    view: AlbumView,
+    libraries: State<'_, Libraries>,
+) -> Result<AlbumView, LibraryError> {
+    libraries.get()?.save_album_view(view)
 }
 
 /// Folders dropped on the window become libraries, checked as the
@@ -417,6 +450,52 @@ mod tests {
         libraries.get().unwrap().wait_idle();
     }
 
+    /// A cover goes to the interface as raw bytes, by track id.
+    #[test]
+    fn a_cover_goes_through_tauri_as_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let music = dir.path().join("Musique");
+        fs::create_dir(&music).unwrap();
+        crate::library::track::tests::tagged_copy("tone.mp3", &music.join("a.mp3"), "A");
+        let libraries = libraries(dir.path());
+        add(&libraries, &Answer(Some(music))).unwrap();
+        libraries.get().unwrap().wait_idle();
+        let id = libraries.get().unwrap().tracks().unwrap()[0].0;
+
+        let app = tauri::test::mock_builder()
+            .invoke_handler(tauri::generate_handler![track_cover])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        app.manage(libraries);
+        app.manage(Covers(dir.path().join("covers")));
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let request = |args: serde_json::Value| {
+            tauri::test::get_ipc_response(
+                &webview,
+                tauri::webview::InvokeRequest {
+                    cmd: "track_cover".into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "http://tauri.localhost".parse().unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(args),
+                    headers: tauri::http::HeaderMap::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.to_owned(),
+                },
+            )
+        };
+
+        match request(serde_json::json!({ "id": id, "size": "small" })).unwrap() {
+            tauri::ipc::InvokeResponseBody::Raw(bytes) => assert_eq!(&bytes[..2], [0xFF, 0xD8]),
+            tauri::ipc::InvokeResponseBody::Json(json) => panic!("not bytes: {json}"),
+        }
+        assert_eq!(
+            request(serde_json::json!({ "id": 9999, "size": "large" })).unwrap_err(),
+            serde_json::json!({ "code": "track_not_found" })
+        );
+    }
+
     /// Runs a command as the interface does, through Tauri's IPC.
     fn invoke(
         webview: &tauri::WebviewWindow<tauri::test::MockRuntime>,
@@ -463,6 +542,8 @@ mod tests {
                 tracks_list,
                 track_view_get,
                 track_view_set,
+                album_view_get,
+                album_view_set,
             ])
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap();
@@ -592,6 +673,28 @@ mod tests {
         assert_eq!(
             invoke(&webview, "track_view_get", serde_json::json!({})).unwrap(),
             view
+        );
+        // The albums' grid too.
+        assert_eq!(
+            invoke(&webview, "album_view_get", serde_json::json!({})).unwrap(),
+            serde_json::Value::Null
+        );
+        let albums = serde_json::json!({
+            "sort": { "column": "year", "descending": true },
+            "size": 400,
+        });
+        assert_eq!(
+            invoke(
+                &webview,
+                "album_view_set",
+                serde_json::json!({ "view": albums })
+            )
+            .unwrap(),
+            serde_json::json!({ "sort": { "column": "year", "descending": true }, "size": 320 })
+        );
+        assert_eq!(
+            invoke(&webview, "album_view_get", serde_json::json!({})).unwrap()["size"],
+            320
         );
 
         assert_eq!(

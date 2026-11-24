@@ -8,7 +8,7 @@ pub mod store;
 
 use std::path::Path;
 
-use commands::{Libraries, TauriEvents};
+use commands::{Covers, Libraries, TauriEvents};
 use library::{LibraryService, ScanEvents, TooBroad};
 use store::{DatabaseStatus, StoreError};
 use tauri::Manager;
@@ -67,6 +67,20 @@ pub fn run() {
             );
             app.manage(status);
             app.manage(libraries);
+            let covers = app
+                .path()
+                .app_cache_dir()
+                .unwrap_or_else(|_| std::env::temp_dir().join("kanade"))
+                .join("cache")
+                .join("covers");
+            app.manage(Covers(covers.clone()));
+            // The covers of tracks gone or changed, off the main thread.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                if let Some(service) = &handle.state::<Libraries>().0 {
+                    let _ = service.purge_covers(&covers);
+                }
+            });
             Ok(())
         })
         .on_window_event(commands::on_window_event)
@@ -85,10 +99,13 @@ pub fn run() {
             commands::settings_get,
             commands::settings_set,
             commands::backup_before_update,
+            commands::track_cover,
             commands::tracks_list,
             commands::track_reveal,
             commands::track_view_get,
             commands::track_view_set,
+            commands::album_view_get,
+            commands::album_view_set,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
