@@ -184,6 +184,11 @@ jobs:
       - name: End-to-end tests
         run: npm run test:e2e
 
+      # TEMPORARY (KAN-18): why the WebView2 session does not start here.
+      - name: Diagnose
+        if: failure()
+        run: node e2e/diagnose.mjs
+
       - name: Keep what the window showed when a test failed
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
