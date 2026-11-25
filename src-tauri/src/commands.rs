@@ -82,11 +82,18 @@ trait Dialogs {
 struct WindowDialogs<R: Runtime>(WebviewWindow<R>);
 
 impl<R: Runtime> Dialogs for WindowDialogs<R> {
+    #[cfg(not(feature = "e2e"))]
     fn pick_folder(&self, title: &str) -> Option<PathBuf> {
         rfd::FileDialog::new()
             .set_title(title)
             .set_parent(&self.0)
             .pick_folder()
+    }
+
+    /// The end-to-end test build: the folder the test gives (e2e.rs).
+    #[cfg(feature = "e2e")]
+    fn pick_folder(&self, _: &str) -> Option<PathBuf> {
+        crate::e2e::picked_folder()
     }
 
     fn save_text(&self, title: &str, file_name: &str) -> Option<PathBuf> {

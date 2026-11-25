@@ -3,15 +3,17 @@
 #![forbid(unsafe_code)]
 
 mod commands;
+#[cfg(feature = "e2e")]
+mod e2e;
 pub mod library;
 pub mod store;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use commands::{Covers, Libraries, TauriEvents};
 use library::{LibraryService, ScanEvents, TooBroad};
 use store::{DatabaseStatus, StoreError};
-use tauri::Manager;
+use tauri::{AppHandle, Manager, Runtime};
 
 /// Version of the app, shown in the interface.
 #[tauri::command]
@@ -52,27 +54,50 @@ fn open_database(
     }
 }
 
+/// The folders of the database and of the cache: the app's own
+/// (`%LOCALAPPDATA%\fr.devsecopsforce.kanade` for both).
+#[cfg(not(feature = "e2e"))]
+fn folders<R: Runtime>(app: &AppHandle<R>) -> (Result<PathBuf, String>, PathBuf) {
+    let data = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| error.to_string());
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .unwrap_or_else(|_| std::env::temp_dir().join("kanade"));
+    (data, cache)
+}
+
+/// The end-to-end test build: the folder the test gives, for both (e2e.rs).
+#[cfg(feature = "e2e")]
+fn folders<R: Runtime>(_: &AppHandle<R>) -> (Result<PathBuf, String>, PathBuf) {
+    let data = e2e::data_dir();
+    let cache = data
+        .clone()
+        .unwrap_or_else(|_| std::env::temp_dir().join("kanade-e2e"));
+    (data, cache)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        // In-app updates from GitHub Releases: tauri.conf.json, plugins.updater.
-        .plugin(tauri_plugin_updater::Builder::new().build())
+    let builder = tauri::Builder::default();
+    // In-app updates from GitHub Releases: tauri.conf.json, plugins.updater.
+    // Not in the end-to-end test build (e2e.rs).
+    #[cfg(not(feature = "e2e"))]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    builder
         // Restarts Kanade once an update is installed.
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
-            let dir = app.path().app_local_data_dir();
+            let (data, cache) = folders(app.handle());
             let (status, libraries) = open_database(
-                dir.as_deref().map_err(ToString::to_string),
+                data.as_deref().map_err(Clone::clone),
                 TauriEvents(app.handle().clone()),
             );
             app.manage(status);
             app.manage(libraries);
-            let covers = app
-                .path()
-                .app_cache_dir()
-                .unwrap_or_else(|_| std::env::temp_dir().join("kanade"))
-                .join("cache")
-                .join("covers");
+            let covers = cache.join("cache").join("covers");
             app.manage(Covers(covers.clone()));
             // The covers of tracks gone or changed, off the main thread.
             let handle = app.handle().clone();
