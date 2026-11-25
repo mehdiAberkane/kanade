@@ -3,7 +3,8 @@
 //   the types (floating promises, unsafe `any`, needless conditions...), the
 //   accessibility rules of jsx-a11y in their strict set (the -x fork: the
 //   original does not support ESLint 10 yet), and the two React hooks rules.
-// - Config files and scripts: the recommended sets, without types.
+// - Config files, scripts and the end-to-end tests (e2e/, run by Node): the
+//   recommended sets, without types.
 // Formatting is Prettier's job (`npm run format:check`), not ESLint's.
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
@@ -33,7 +34,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["*.config.{js,ts}", "scripts/**/*.mjs"],
+    files: ["*.config.{js,ts}", "scripts/**/*.mjs", "e2e/**/*.mjs"],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     languageOptions: { globals: globals.node },
   },
