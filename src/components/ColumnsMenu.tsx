@@ -16,11 +16,15 @@ export function ColumnsMenu({
   useEffect(() => {
     if (!open) return;
     const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key !== "Escape") return;
+      // The panel only: not a step back of the page it is on.
+      event.preventDefault();
+      setOpen(false);
     };
-    document.addEventListener("keydown", escape);
+    // Captured: before the page's own Escape, which then sees it handled.
+    document.addEventListener("keydown", escape, true);
     return () => {
-      document.removeEventListener("keydown", escape);
+      document.removeEventListener("keydown", escape, true);
     };
   }, [open]);
 

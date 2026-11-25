@@ -1095,3 +1095,113 @@ main {
   flex-direction: column;
   height: max(320px, 60vh);
 }
+
+/* --- Search and filters (KAN-6) ----------------------------------------- */
+
+.search-bar {
+  position: relative;
+  margin-bottom: 0.5rem;
+}
+
+.search-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.search-field {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.7rem;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+}
+
+.search-field:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.filter-panel {
+  position: absolute;
+  right: 0;
+  z-index: 4;
+  width: min(44rem, 100%);
+  max-height: 70vh;
+  overflow: auto;
+  margin-top: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  background: var(--panel);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 15%);
+}
+
+.filter-panel-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: 0.75rem 1.25rem;
+}
+
+.filter-group {
+  min-width: 0;
+  margin: 0;
+  border: none;
+  padding: 0;
+}
+
+.filter-group legend {
+  margin-bottom: 0.25rem;
+  padding: 0;
+  font-weight: 600;
+}
+
+.filter-group ul {
+  max-height: 12rem;
+  overflow: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.filter-group li {
+  padding: 0.1rem 0;
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.filter-chips ul {
+  display: contents;
+  list-style: none;
+}
+
+.chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--accent);
+}
+
+.btn-link {
+  border: none;
+  padding: 0.1rem 0.3rem;
+  background: none;
+  color: var(--accent);
+  font-size: 0.85rem;
+  text-decoration: underline;
+  cursor: pointer;
+}

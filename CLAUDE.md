@@ -166,6 +166,15 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
     en fin de liste, après « Artiste inconnu ».
   - Le dernier départage d'un tri compare les clés code par code (`byCode`) : le
     collator prend « Strauß » et « Strauss » pour égaux.
+- Recherche et filtres (`src/lib/search.ts`, barre au-dessus des trois onglets) : en
+  mémoire, comme le tri.
+  - Chaque morceau a un texte normalisé (`searchText`), fait une fois et préparé en
+    arrière-plan à l'arrivée de la liste (`warmSearch`).
+  - Mesuré sur 50 000 morceaux : préparation d'environ 450 ms en étapes de 9 ms ;
+    recherche en 10 à 15 ms ; nombres du panneau en 20 à 40 ms.
+  - Pas de SQL, donc rien de tapé n'atteint une requête.
+  - Un panneau ou un menu qui se ferme sur Échap écoute en capture et marque la touche
+    traitée, pour que la page dessous (un artiste, un album) ne recule pas aussi.
 - Pochettes (`library/covers.rs`, `src/lib/covers.ts`) :
   - `track_cover` reçoit un identifiant de morceau et renvoie un JPEG de 400 ou 900 px,
     jamais l'image d'origine ni un chemin ;
