@@ -67,6 +67,11 @@ async function edgeDriver() {
   // Windows' own tar (bsdtar) reads zip archives.
   execFileSync(join(SYSTEM32, "tar.exe"), ["-xf", zip, "-C", dir, "msedgedriver.exe"]);
   rmSync(zip);
+  // Without PSModulePath: coming from PowerShell 7 (the CI's shell), it sends
+  // Windows PowerShell to PowerShell 7's modules, which it cannot load.
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => name.toLowerCase() !== "psmodulepath"),
+  );
   const signature = execFileSync(
     join(SYSTEM32, "WindowsPowerShell", "v1.0", "powershell.exe"),
     [
@@ -75,7 +80,7 @@ async function edgeDriver() {
       "$s = Get-AuthenticodeSignature -LiteralPath $env:EDGE_DRIVER; " +
         '"$($s.Status)|$($s.SignerCertificate.Subject)"',
     ],
-    { encoding: "utf8", env: { ...process.env, EDGE_DRIVER: exe } },
+    { encoding: "utf8", env: { ...env, EDGE_DRIVER: exe } },
   ).trim();
   if (!/^Valid\|.*O=Microsoft Corporation/.test(signature)) {
     rmSync(dir, { recursive: true, force: true });
