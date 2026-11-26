@@ -136,8 +136,7 @@ impl Index {
         // One that no longer reads gives way to the default.
         Ok(json
             .and_then(|json| serde_json::from_str::<Appearance>(&json).ok())
-            .map(Appearance::sanitized)
-            .unwrap_or_default())
+            .map_or_else(Appearance::default, Appearance::sanitized))
     }
 
     pub fn save_appearance(&mut self, appearance: Appearance) -> rusqlite::Result<Appearance> {
