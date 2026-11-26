@@ -9,7 +9,9 @@ import { installMockBackend } from "./mockBackend";
 import {
   createMockLibraries,
   librariesScenario,
+  LIVE_WATCH,
   NOT_MINE,
+  watchScenario,
   type MockLibraries,
 } from "./mockLibraries";
 import type { LibraryView } from "../lib/libraries";
@@ -135,6 +137,44 @@ describe("fake libraries", () => {
   });
 });
 
+describe("the fake watch of the folders", () => {
+  it("watches, stops, and fails on the unplugged drive until it is found", async () => {
+    setup();
+    expect((await byName("Musique"))?.watcher).toEqual({ state: "watching" });
+    expect((await byName("OneDrive"))?.watcher).toEqual({ state: "off" });
+    expect((await byName("Disque externe"))?.watcher.state).toBe("failed");
+
+    const off = await invoke<LibraryView>("library_set_watch", { id: 1, watch: false });
+    expect(off.watcher).toEqual({ state: "off" });
+    // Back on: read once, for what changed meanwhile.
+    const on = await invoke<LibraryView>("library_set_watch", { id: 1, watch: true });
+    expect(on.watcher).toEqual({ state: "watching" });
+    expect((await byName("Musique"))?.scan.state).not.toBe("idle");
+    await idle();
+    const found = await invoke<LibraryView>("library_relocate", { id: 3 });
+    expect(found.watcher).toEqual({ state: "watching" });
+    await idle();
+  });
+
+  it("brings files to a watched library and tells it, not to one unwatched", async () => {
+    const mock = setup();
+    const told: unknown[] = [];
+    await listen("library-updated", (event) => told.push(event.payload));
+    mock.simulateWatch(1, 12);
+    mock.simulateWatch(2, 5);
+    await vi.waitFor(() => {
+      expect(told).toEqual([{ libraryId: 1, added: 12, updated: 0, removed: 0 }]);
+    });
+    expect((await byName("Musique"))?.tracks).toBe(45_957);
+    expect((await byName("OneDrive"))?.tracks).toBe(845);
+  });
+
+  it("reads ?watch=live", () => {
+    expect(watchScenario("?watch=live")).toBe(true);
+    expect(watchScenario("?watch=off")).toBe(false);
+  });
+});
+
 describe("fake tracks", () => {
   it("lists the tracks of each library, the same at each call", async () => {
     setup();
@@ -206,6 +246,17 @@ describe("fake tracks", () => {
 });
 
 describe("installMockBackend", () => {
+  it("brings files every few seconds with ?watch=live", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    window.history.replaceState(null, "", "/?watch=live");
+    installMockBackend();
+    const before = (await byName("Musique"))?.tracks ?? 0;
+    vi.advanceTimersByTime(LIVE_WATCH.everyMs);
+    expect((await byName("Musique"))?.tracks).toBe(before + LIVE_WATCH.added);
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
   it("answers from the libraries chosen in the address", async () => {
     window.history.replaceState(null, "", "/?libraries=empty");
     installMockBackend();

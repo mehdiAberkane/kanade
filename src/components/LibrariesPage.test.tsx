@@ -88,6 +88,35 @@ describe("Libraries page", () => {
     expect(external.getByText(/^3\s210 morceaux$/)).toBeTruthy();
   });
 
+  it("says how each folder is watched, and turns the watch on or off", async () => {
+    const { calls } = backend();
+    const app = await renderApp();
+    const musique = await card(app, "Musique");
+    expect(musique.getByText(/^Surveillé : /)).toBeTruthy();
+    const external = await card(app, "Disque externe");
+    expect(
+      external.getByText(/^Windows ne peut pas surveiller ce dossier \(Le périphérique/),
+    ).toBeTruthy();
+
+    const onedrive = await card(app, "OneDrive");
+    const box = onedrive.getByRole("checkbox", { name: "Surveiller le dossier en temps réel" });
+    expect(box).toHaveProperty("checked", false);
+    expect(onedrive.getByText(/^Pas surveillé : /)).toBeTruthy();
+    const scanned = onedrive.getByText(/^Dernier scan le /).textContent;
+    await app.user.click(box);
+    expect(await onedrive.findByText(/^Surveillé : /)).toBeTruthy();
+    expect(calls).toContainEqual({ cmd: "library_set_watch", args: { id: 2, watch: true } });
+    // Back on, the library is read once for what changed meanwhile.
+    await app.waitFor(
+      () => {
+        expect(onedrive.getByText(/^Dernier scan le /).textContent).not.toBe(scanned);
+      },
+      { timeout: 2000 },
+    );
+    await app.user.click(onedrive.getByRole("checkbox"));
+    expect(await onedrive.findByText(/^Pas surveillé : /)).toBeTruthy();
+  });
+
   it("starts empty, adds the picked folder and scans it", async () => {
     const { calls } = backend("empty");
     const app = await renderApp();
@@ -338,7 +367,16 @@ describe("Drop on the window", () => {
     expect(veil()).toBeNull();
 
     const report: DropReport = {
-      added: [{ id: 9, name: "Vinyles", root: String.raw`D:\Vinyles`, addedMs: 0, lastScan: null }],
+      added: [
+        {
+          id: 9,
+          name: "Vinyles",
+          root: String.raw`D:\Vinyles`,
+          addedMs: 0,
+          lastScan: null,
+          watch: true,
+        },
+      ],
       refused: [
         {
           path: String.raw`D:\notes.txt`,

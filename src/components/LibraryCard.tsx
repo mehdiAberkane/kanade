@@ -8,6 +8,7 @@ import {
   lastScanLine,
   onlineOnlyLine,
   progressLine,
+  watchLine,
   type LibraryView,
 } from "../lib/libraries";
 import { ScanErrorsPanel } from "./ScanErrorsPanel";
@@ -67,6 +68,16 @@ export function LibraryCard({ library }: { library: LibraryView }) {
             : lastScanLine(library.lastScan)}
         </p>
       )}
+
+      <label className="settings-row watch-row">
+        <input
+          type="checkbox"
+          checked={library.watch}
+          onChange={(event) => void run("library_set_watch", { watch: event.target.checked })}
+        />
+        Surveiller le dossier en temps réel
+      </label>
+      <p className={`hint watch-${library.watcher.state}`}>{watchLine(library.watcher)}</p>
 
       {online && !busy && (
         <div className="notice">

@@ -25,6 +25,17 @@ export function librariesScenario(search: string): LibrariesScenario {
   return new URLSearchParams(search).get("libraries") === "empty" ? "empty" : "sample";
 }
 
+/**
+ * `?watch=live`: files keep arriving in « Musique », as the watch of its
+ * folder would report them (KAN-27).
+ */
+export function watchScenario(search: string): boolean {
+  return new URLSearchParams(search).get("watch") === "live";
+}
+
+/** How often `?watch=live` brings files, and how many. */
+export const LIVE_WATCH = { everyMs: 8000, added: 12 };
+
 /** Answer of `handle` for a command that is not about the libraries. */
 export const NOT_MINE = Symbol("not a library command");
 
@@ -34,6 +45,8 @@ const SUB_FOLDERS = ["Albums", "Compilations", "Live", "Singles", "Bandes origin
 
 /** What Windows says of a drive that is not there. */
 const OFFLINE = "Le chemin d’accès spécifié est introuvable. (os error 3)";
+/** Why Windows cannot watch the unplugged drive. */
+const UNPLUGGED = "Le périphérique n’est pas prêt. (os error 21)";
 
 /**
  * The folders the fake picker hands out, one per click. With the sample
@@ -97,6 +110,8 @@ function sample(now: number): Entry[] {
         addedMs: now - 90 * DAY_MS,
         tracks: 45_945,
         scan: { state: "idle" },
+        watch: true,
+        watcher: { state: "watching" },
         lastScan: lastScan(
           now - 2 * DAY_MS,
           { kind: "done" },
@@ -139,6 +154,9 @@ function sample(now: number): Entry[] {
         addedMs: now - 30 * DAY_MS,
         tracks: 845,
         scan: { state: "idle" },
+        // Turned off by the user: a synced folder that changes all day.
+        watch: false,
+        watcher: { state: "off" },
         lastScan: lastScan(now - DAY_MS, { kind: "done" }, { unchanged: 845, onlineOnly: 37 }),
       },
       files: 845,
@@ -154,6 +172,8 @@ function sample(now: number): Entry[] {
         addedMs: now - 60 * DAY_MS,
         tracks: 3_210,
         scan: { state: "idle" },
+        watch: true,
+        watcher: { state: "failed", reason: UNPLUGGED },
         lastScan: lastScan(now - 3 * DAY_MS, { kind: "unavailable", message: OFFLINE }),
       },
       files: 3_210,
@@ -368,6 +388,8 @@ export function createMockLibraries({
         tracks: 0,
         scan: { state: "idle" },
         lastScan: null,
+        watch: true,
+        watcher: { state: "watching" },
       },
       files: 1_240,
       online: 0,
@@ -457,7 +479,15 @@ export function createMockLibraries({
         // The drive came back as F:.
         entry.view.root = entry.view.root.replace(/^[A-Z]:/, "F:");
         entry.reachable = true;
+        rewatch(entry);
         enqueue(entry, false);
+        return structuredClone(entry.view);
+      case "library_set_watch":
+        entry.view.watch = (args as { watch?: boolean }).watch === true;
+        rewatch(entry);
+        // Back on, it is read once for what changed meanwhile.
+        if (entry.view.watch) enqueue(entry, false);
+        changed();
         return structuredClone(entry.view);
       case "library_errors":
         return structuredClone(entry.errors);
@@ -469,6 +499,28 @@ export function createMockLibraries({
     }
   }
 
+  /** How the folder is watched, as the Rust side says it. */
+  function rewatch(entry: Entry) {
+    entry.view.watcher = !entry.view.watch
+      ? { state: "off" }
+      : entry.reachable
+        ? { state: "watching" }
+        : { state: "failed", reason: UNPLUGGED };
+  }
+
+  /**
+   * What the watch of a folder would bring (KAN-27): `added` files copied
+   * into the library `id`, then the events the Rust side sends.
+   */
+  function simulateWatch(id: number, added: number) {
+    const entry = entries.find((e) => e.view.id === id && e.view.watcher.state === "watching");
+    if (!entry) return;
+    entry.view.tracks += added;
+    entry.files += added;
+    void emit(LIBRARY_EVENTS.updated, { libraryId: id, added, updated: 0, removed: 0 });
+    changed();
+  }
+
   /** Stops the fake scans, so that none emits once a test is over. */
   function dispose() {
     queue.length = 0;
@@ -476,5 +528,5 @@ export function createMockLibraries({
     running = null;
   }
 
-  return { handle, dispose };
+  return { handle, dispose, simulateWatch };
 }

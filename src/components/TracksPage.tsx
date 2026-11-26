@@ -10,7 +10,7 @@ import {
   type Filters,
 } from "../lib/search";
 import { sortTracks, type Context } from "../lib/tracks";
-import { useAddLibrary, useLibraries } from "../lib/useLibraries";
+import { useAddLibrary, useLibraries, useWatchNews } from "../lib/useLibraries";
 import { useTracks, useTrackView } from "../lib/useTracks";
 import { AlbumsView } from "./AlbumsView";
 import { ArtistsView } from "./ArtistsView";
@@ -37,6 +37,7 @@ export function TracksPage({ onManage }: { onManage: () => void }) {
   const [tab, setTab] = useState<Tab>("tracks");
   const { libraries } = useLibraries();
   const { tracks, error } = useTracks();
+  const news = useWatchNews();
   const { view, update } = useTrackView();
   const { add, adding, refusal } = useAddLibrary();
   const [chosen, setChosen] = useState<number | null>(null);
@@ -242,32 +243,37 @@ export function TracksPage({ onManage }: { onManage: () => void }) {
             now={now}
           />
         )}
-        <div className="view-tabs" role="tablist" aria-label="Affichage">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              id={`tab-${t}`}
-              type="button"
-              role="tab"
-              aria-selected={tab === t}
-              aria-controls="view-panel"
-              tabIndex={tab === t ? 0 : -1}
-              onClick={() => {
-                setTab(t);
-              }}
-              onKeyDown={(event) => {
-                // Left and right go from one tab to the other.
-                const step = { ArrowLeft: -1, ArrowRight: 1 }[event.key];
-                if (step === undefined) return;
-                event.preventDefault();
-                const next = TABS[(TABS.indexOf(t) + step + TABS.length) % TABS.length];
-                setTab(next);
-                document.getElementById(`tab-${next}`)?.focus();
-              }}
-            >
-              {TAB_LABELS[t]}
-            </button>
-          ))}
+        <div className="view-bar">
+          <div className="view-tabs" role="tablist" aria-label="Affichage">
+            {TABS.map((t) => (
+              <button
+                key={t}
+                id={`tab-${t}`}
+                type="button"
+                role="tab"
+                aria-selected={tab === t}
+                aria-controls="view-panel"
+                tabIndex={tab === t ? 0 : -1}
+                onClick={() => {
+                  setTab(t);
+                }}
+                onKeyDown={(event) => {
+                  // Left and right go from one tab to the other.
+                  const step = { ArrowLeft: -1, ArrowRight: 1 }[event.key];
+                  if (step === undefined) return;
+                  event.preventDefault();
+                  const next = TABS[(TABS.indexOf(t) + step + TABS.length) % TABS.length];
+                  setTab(next);
+                  document.getElementById(`tab-${next}`)?.focus();
+                }}
+              >
+                {TAB_LABELS[t]}
+              </button>
+            ))}
+          </div>
+          <p className="watch-news" role="status">
+            {news}
+          </p>
         </div>
         {error && (
           <p className="status status-error" role="alert">

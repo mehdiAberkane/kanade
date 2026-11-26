@@ -4,6 +4,8 @@ import {
   count,
   dropLines,
   errorText,
+  updateLine,
+  watchLine,
   formatNumber,
   lastScanLine,
   onlineOnlyLine,
@@ -42,6 +44,8 @@ function view(fields: Partial<LibraryView> = {}): LibraryView {
     lastScan: null,
     tracks: 0,
     scan: { state: "idle" },
+    watch: true,
+    watcher: { state: "watching" },
     ...fields,
   };
 }
@@ -180,7 +184,7 @@ describe("dropLines", () => {
   it("names each library added, and each path refused once", () => {
     expect(
       dropLines({
-        added: [{ id: 1, name: "Jazz", root: "D:\\Jazz", addedMs: 0, lastScan: null }],
+        added: [{ id: 1, name: "Jazz", root: "D:\\Jazz", addedMs: 0, lastScan: null, watch: true }],
         refused: [
           { path: "C:\\", error: { code: "too_broad", root: "C:\\" } },
           { path: "D:\\Musique\\Rock", error: { code: "inside_library", name: "Musique" } },
@@ -193,5 +197,25 @@ describe("dropLines", () => {
       "D:\\Musique\\Rock : Ce dossier est dans la bibliothèque « Musique » : ses morceaux y " +
         "sont déjà.",
     ]);
+  });
+});
+
+describe("the watch of the folders", () => {
+  it("says what an update changed, in French plurals", () => {
+    expect(updateLine({ added: 12, updated: 0, removed: 0 })).toBe("12 morceaux ajoutés");
+    expect(updateLine({ added: 1, updated: 1, removed: 1 })).toBe(
+      "1 morceau ajouté · 1 morceau mis à jour · 1 morceau retiré",
+    );
+    expect(updateLine({ added: 0, updated: 2, removed: 1500 })).toMatch(
+      /^2 morceaux mis à jour · 1\s500 morceaux retirés$/,
+    );
+  });
+
+  it("says how a library's folder is watched", () => {
+    expect(watchLine({ state: "watching" })).toMatch(/^Surveillé : /);
+    expect(watchLine({ state: "off" })).toMatch(/toutes les 30 minutes\.$/);
+    expect(watchLine({ state: "failed", reason: "os error 21" })).toMatch(
+      /^Windows ne peut pas surveiller ce dossier \(os error 21\) : .*réessaie/,
+    );
   });
 });
