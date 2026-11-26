@@ -930,12 +930,12 @@ mod tests {
                     b.clone(),
                 ],
             ),
-            vec![a.clone(), c.clone()]
+            vec![a.clone(), c]
         );
         // A folder inside one already kept is not walked twice; the other
         // way round, the folder above replaces it.
         assert_eq!(
-            folders_to_scan(&root_text, &[b.clone(), a.clone()]),
+            folders_to_scan(&root_text, &[b, a.clone()]),
             vec![a]
         );
         assert_eq!(
