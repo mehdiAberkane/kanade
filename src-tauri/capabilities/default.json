@@ -1,11 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window: the app's commands, plus the update check and install (updater) and the restart after an update (process).",
+  "description": "The main window: the app's commands, plus the update check and install (updater), the restart after an update (process), and from the Appearance page the title bar's theme and the zoom of the page.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "updater:default",
-    "process:allow-restart"
+    "process:allow-restart",
+    "core:window:allow-set-theme",
+    "core:webview:allow-set-webview-zoom"
   ]
 }
