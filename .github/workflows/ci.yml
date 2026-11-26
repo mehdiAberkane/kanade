@@ -3,10 +3,11 @@
 #   with coverage thresholds, npm audit, unused code (knip);
 # - rust, on Windows (the platform Kanade runs on): format, Clippy, tests with
 #   a coverage threshold, cargo-deny, unused crates (cargo-machete);
+# - e2e, on Windows: the real app, driven through tauri-driver (e2e/);
 # - workflows: an audit of the workflows themselves (zizmor);
 # - dependency-review, on pull requests: the new dependencies;
 # - installer, after a merge on main only: the packaged app as an artifact.
-# The first four are required on main. The release workflow runs it too and only
+# The first five are required on main. The release workflow runs it too and only
 # publishes when it passes.
 # Actions are pinned to a commit SHA; Dependabot updates them.
 name: CI
@@ -102,10 +103,15 @@ jobs:
         run: cargo fmt --check
 
       # --locked: fails when Cargo.lock is out of date with Cargo.toml instead
-      # of quietly updating it, as npm ci does for npm.
+      # of quietly updating it, as npm ci does for npm. Twice: the app, then
+      # the end-to-end test build, whose code (src/e2e.rs) only compiles with
+      # its feature.
       - name: Clippy
         working-directory: src-tauri
-        run: cargo clippy --locked --all-targets -- -D warnings
+        shell: bash
+        run: |
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo clippy --locked --all-targets --features e2e -- -D warnings
 
       # The tests, with line coverage: the table per file is printed in the log.
       # The binary is cached by rust-cache; raise the version here to update it.
@@ -141,6 +147,58 @@ jobs:
         run: |
           [ "$(cargo machete --version 2>/dev/null)" = "0.10.1" ] || cargo install cargo-machete --locked --version 0.10.1
           cargo machete
+
+  # The real app, built with the e2e feature (src-tauri/src/e2e.rs) and driven
+  # through tauri-driver and the Edge WebDriver (e2e/): a library added from
+  # the interface, its tracks listed, found again after a restart.
+  e2e:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      # Its own cache entry (the key includes the job): the e2e build, its
+      # tests and tauri-driver.
+      - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri -> target
+          key: v2
+
+      - run: npm ci --ignore-scripts
+
+      # Skipped when the cached one is this version. Raise it here and in
+      # e2e/setup.mjs together.
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked --version 2.1.0
+
+      # Builds the app (npm run build:e2e), then runs e2e/. The Edge WebDriver
+      # that matches WebView2 comes from Microsoft, its signature checked.
+      - name: End-to-end tests
+        run: npm run test:e2e
+
+      # The e2e build's own code (src-tauri/src/e2e.rs) only compiles with
+      # its feature, which the rust job's tests leave out. After the step
+      # above, which built the interface it embeds.
+      - name: Tests of the e2e build's code
+        working-directory: src-tauri
+        run: cargo test --locked --features e2e --lib e2e
+
+      - name: Keep what the window showed when a test failed
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-screenshots
+          path: src-tauri/target/e2e-screenshots/
+          if-no-files-found: ignore
+          retention-days: 7
 
   # After each merge on main: the whole app, packaged (MSI and setup .exe),
   # attached to the run (Summary › Artifacts) to try a card in « A verifier »

@@ -16,6 +16,12 @@ publish = false
 name = "kanade_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# The build of the end-to-end tests (`npm run test:e2e`), never published:
+# the folder picker answers with a folder the test gives, and the database
+# goes to a folder of its own (src/e2e.rs).
+e2e = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

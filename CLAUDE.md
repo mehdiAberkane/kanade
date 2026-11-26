@@ -11,7 +11,8 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
 - **PR/MR** : `gh pr create` vers `main`, en fusion automatique quand la CI est verte.
   Checks obligatoires sur `main` : `interface` (typage, lint, tests et couverture, audit
   npm, sur Ubuntu), `rust` (build, format, Clippy, tests et couverture, cargo-deny, sur
-  Windows), `workflows` (zizmor) et `dependency-review`. Renommer un de ces jobs oblige à
+  Windows), `e2e` (la vraie app par tauri-driver, sur Windows), `workflows` (zizmor) et
+  `dependency-review`. Renommer un de ces jobs oblige à
   mettre à jour la protection de `main`, sinon plus aucune PR ne fusionne. CodeQL
   (`codeql.yml`) est informatif : ses alertes vont dans l'onglet Security.
 - **Techno** : Tauri 2 (Rust, édition 2024) + React 19 + TypeScript 6 (Vite 8) ; Node 22 en CI.
@@ -20,6 +21,11 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
 
 - Installer : `npm install`
 - Tests : `npm test`, puis `cargo test --locked` dans `src-tauri`
+- Tests de bout en bout : `npm run test:e2e` (build avec l'option `e2e`, puis `e2e/` par
+  tauri-driver). Il ouvre une vraie fenêtre Kanade sur le PC quelques secondes :
+  demande-moi avant de le lancer. Outil : `cargo install tauri-driver --locked --version
+  2.1.0` (version aussi dans `e2e/setup.mjs` et `ci.yml`) ; le pilote d'Edge qui
+  correspond à WebView2 se télécharge seul depuis Microsoft, signature vérifiée.
 - Couverture, comme la CI : `npm run test:coverage` (seuils dans `vitest.config.ts`),
   puis dans `src-tauri` : `cargo llvm-cov --locked --fail-under-lines 95` (seuil dans
   `ci.yml`). Les seuils sont posés juste sous le niveau atteint : monte-les quand des
@@ -101,6 +107,17 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
 - La logique Rust se vérifie par `cargo test`, sur des fichiers d'exemple :
   `src-tauri/tests/fixtures` (un son d'une seconde par format, sans tags ; les tests y
   écrivent les tags avec lofty). Son README dit comment les régénérer avec VLC.
+- La vraie app se vérifie par les tests de bout en bout (`e2e/`, job `e2e` de la CI) : le
+  build `e2e` (`src-tauri/src/e2e.rs`, jamais publié) prend sa base dans
+  `KANADE_E2E_DATA`, répond au sélecteur de dossier par `KANADE_E2E_LIBRARY`, n'a pas de
+  mises à jour et a son propre identifiant (`tauri.e2e.conf.json`). Il passe lui-même à
+  WebView2 les options du pilote Edge (`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`), que
+  WebView2 ignore sur les runners GitHub ; ce code ne compile qu'avec l'option `e2e`, ses
+  tests (`cargo test --features e2e --lib e2e`) tournent dans le job `e2e`. Le test s'arrête
+  avant tout clic si la base n'apparaît pas dans son dossier (un autre build ouvrirait
+  la vraie). Un parcours que seule la vraie app montre (Rust et interface ensemble, base
+  gardée après une relance) y ajoute un scénario ; les écrans eux-mêmes restent aux
+  tests de composants.
 - Seul ce que Windows est le seul à montrer demande une prise de contrôle : fenêtre native,
   barre des tâches, sélecteur de dossier, lecture audio réelle. Demande d'abord ; si je
   refuse ou ne réponds pas, mets-le dans « À vérifier » du compte rendu.

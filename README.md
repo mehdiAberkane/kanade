@@ -49,6 +49,24 @@ Outils : `cargo install cargo-deny --locked --version 0.22.0`,
 `rustup component add llvm-tools-preview` et
 `cargo install cargo-llvm-cov --locked --version 0.9.2`.
 
+### De bout en bout
+
+```bash
+npm run test:e2e
+```
+
+Construit l'app avec l'option `e2e` (`npm run build:e2e`), puis la pilote par WebDriver
+(`e2e/`) : une fenêtre Kanade s'ouvre quelques secondes, ajoute une bibliothèque de
+fichiers d'exemple, vérifie la liste, se relance et la retrouve. Ce build de test range
+sa base dans un dossier temporaire : la vraie base n'est jamais touchée. Il n'est jamais
+publié.
+
+Outil : `cargo install tauri-driver --locked --version 2.1.0`. Le pilote d'Edge
+(msedgedriver) qui correspond à la version de WebView2 se télécharge tout seul depuis
+Microsoft, signature vérifiée, dans `src-tauri/target/edgedriver`. Quand un test échoue,
+une capture de la fenêtre va dans `src-tauri/target/e2e-screenshots` (et dans les
+artefacts du run, en CI).
+
 ## Mises à jour
 
 Kanade cherche une nouvelle version sur les Releases GitHub du dépôt : au lancement, puis

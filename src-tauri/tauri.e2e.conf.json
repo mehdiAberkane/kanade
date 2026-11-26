@@ -1,0 +1,6 @@
+{
+  "identifier": "fr.devsecopsforce.kanade.e2e",
+  "bundle": {
+    "createUpdaterArtifacts": false
+  }
+}
