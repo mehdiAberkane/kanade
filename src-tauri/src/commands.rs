@@ -20,7 +20,7 @@ use crate::background;
 use crate::library::{
     AlbumView, Appearance, CoverSize, DropReport, Library, LibraryError, LibraryId, LibraryService,
     LibraryView, RevealTarget, ScanErrors, ScanEvents, ScanProgress, Settings, TrackId, TrackRow,
-    TrackView,
+    TrackView, WatchUpdate,
 };
 
 /// The folder of the covers' thumbnails, apart from the database
@@ -45,6 +45,8 @@ const LIBRARIES_CHANGED: &str = "libraries-changed";
 const SCAN_PROGRESS: &str = "library-scan-progress";
 /// What became of the folders dropped on the window.
 const LIBRARY_DROPPED: &str = "library-dropped";
+/// What a watch update changed in a library (KAN-27).
+const LIBRARY_UPDATED: &str = "library-updated";
 
 /// The libraries, absent when the database did not open (the interface
 /// already says so).
@@ -68,6 +70,14 @@ struct ProgressEvent<'a> {
     progress: &'a ScanProgress,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdatedEvent<'a> {
+    library_id: LibraryId,
+    #[serde(flatten)]
+    update: &'a WatchUpdate,
+}
+
 impl<R: Runtime> ScanEvents for TauriEvents<R> {
     // An event the window cannot get (closing) has no one left to tell.
     fn changed(&self) {
@@ -80,6 +90,16 @@ impl<R: Runtime> ScanEvents for TauriEvents<R> {
             ProgressEvent {
                 library_id: library,
                 progress,
+            },
+        );
+    }
+
+    fn updated(&self, library: LibraryId, update: &WatchUpdate) {
+        let _ = self.0.emit(
+            LIBRARY_UPDATED,
+            UpdatedEvent {
+                library_id: library,
+                update,
             },
         );
     }
