@@ -551,7 +551,7 @@ mod tests {
         assert_eq!(s.index.count_under(&library.root).unwrap(), FIXTURES.len());
         assert_eq!(s.scanner.state_of(library.id), ScanState::Idle);
         // Queued, started, ended.
-        assert!(s.events.changes.load(Ordering::Relaxed) >= 3);
+        assert!(told(&s.events, 3) >= 3);
         // The first step at least was told.
         let progress = s.events.progress.lock().unwrap();
         assert!(progress.iter().all(|(id, _)| *id == library.id));
@@ -753,6 +753,20 @@ mod tests {
         assert!(s.index.library(library.id).unwrap().is_some());
     }
 
+    /// How many times the interface was told the libraries changed, once it
+    /// is `at_least` or after 5 s. The last one comes just after the scan
+    /// thread is idle, so that the interface reads it idle.
+    fn told(events: &Recorder, at_least: usize) -> usize {
+        let end = Instant::now() + Duration::from_secs(5);
+        loop {
+            let told = events.changes.load(Ordering::Relaxed);
+            if told >= at_least || Instant::now() > end {
+                return told;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     /// A library of every fixture, scanned, and an album folder in it.
     fn scanned() -> (Setup, crate::library::Library, PathBuf) {
         let mut s = setup();
@@ -762,6 +776,8 @@ mod tests {
             .unwrap();
         s.scanner.enqueue(library.id, false);
         s.scanner.wait_idle();
+        // Queued, started, ended: all told before the test counts.
+        told(&s.events, 3);
         let album = Path::new(&library.root).join("Album");
         fs::create_dir(&album).unwrap();
         (s, library, album)
@@ -801,13 +817,14 @@ mod tests {
         );
         // Not a scan: no progress, the summary of the last scan untouched.
         assert_eq!(s.events.progress.lock().unwrap().len(), progress);
-        assert_eq!(s.events.changes.load(Ordering::Relaxed), changes + 1);
+        assert_eq!(told(&s.events, changes + 1), changes + 1);
         let last = s.index.library(library.id).unwrap().unwrap().last_scan;
         assert_eq!(last.unwrap().added, FIXTURES.len());
 
-        // Nothing changed: nothing told.
+        // Nothing changed: nothing told, even given the time.
         s.scanner.queue().enqueue_folders(library.id, vec![album]);
         s.scanner.wait_idle();
+        thread::sleep(Duration::from_millis(100));
         assert_eq!(s.events.updates.lock().unwrap().len(), 1);
         assert_eq!(s.events.changes.load(Ordering::Relaxed), changes + 1);
     }
@@ -934,10 +951,7 @@ mod tests {
         );
         // A folder inside one already kept is not walked twice; the other
         // way round, the folder above replaces it.
-        assert_eq!(
-            folders_to_scan(&root_text, &[b, a.clone()]),
-            vec![a]
-        );
+        assert_eq!(folders_to_scan(&root_text, &[b, a.clone()]), vec![a]);
         assert_eq!(
             folders_to_scan(&root_text, &[root.join("nothing.mp3")]),
             vec![root.clone()]
