@@ -1656,3 +1656,95 @@ fieldset.settings-section legend + * {
   font-size: 0.85rem;
   white-space: nowrap;
 }
+
+/* --- Health of the library (KAN-28) ------------------------------------ */
+
+.health-score {
+  margin: 0.5rem 0 1rem;
+  font-size: 1.05rem;
+}
+
+.health-score strong {
+  font-size: 1.6rem;
+}
+
+.health-checks,
+.health-issues {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.health-check {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr auto;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.8rem;
+  background: var(--panel);
+  text-align: left;
+  cursor: pointer;
+}
+
+.health-check .hint {
+  grid-column: 2 / -1;
+}
+
+.health-check.clear {
+  color: var(--muted);
+}
+
+.health-severity {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.severity-grave .health-severity {
+  color: var(--error);
+}
+
+.severity-fix .health-severity {
+  color: var(--text);
+}
+
+.severity-look .health-severity {
+  color: var(--muted);
+}
+
+.health-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.health-issue {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.8rem;
+  background: var(--panel);
+}
+
+.health-issue.ignored {
+  opacity: 0.6;
+}
+
+.health-issue-text {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.health-issue-actions {
+  display: flex;
+  gap: 0.5rem;
+}

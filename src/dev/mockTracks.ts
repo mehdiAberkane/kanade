@@ -1,6 +1,8 @@
 // Fake tracks for the browser preview and the tests: realistic and always
 // the same for a library, with what the sort has to handle (accents,
-// articles, numbers, empty tags) and a few files gone or unreadable.
+// articles, numbers, empty tags), a few files gone or unreadable, and now
+// and then what the health page reports (KAN-28): a missing genre, an
+// ID3v1 number, a name written another way, a year or a track number off.
 import type { TrackRow } from "../lib/tracks";
 
 const PREFIXES = ["", "", "Les ", "The ", "La ", "L'", "Le ", "A "];
@@ -116,6 +118,23 @@ export function mockTracks(
       // Now and then: no tags, a file gone, a damaged one.
       const untagged = id % 211 === 0;
       const status = id % 997 === 0 ? 2 : id % 1499 === 0 ? 1 : 0;
+      // And what a real collection has (health, KAN-28).
+      const sloppy = {
+        artist:
+          id % 97 === 0 ? performer.toUpperCase() : id % 619 === 0 ? `${performer} ` : performer,
+        album: id % 331 === 0 ? album.toLowerCase() : album,
+        number: id % 509 === 0 && number > 1 ? number - 1 : number,
+        year: id % 263 === 0 ? year + 1 : year,
+        genre:
+          id % 53 === 0
+            ? null
+            : id % 401 === 0
+              ? "(17)"
+              : genre === "Hip-hop" && id % 7 === 0
+                ? "Hip Hop"
+                : genre,
+        bitrate: format === "MP3" && id % 173 === 0 ? 96 : bitrate,
+      };
       rows.push([
         id,
         libraryId,
@@ -123,20 +142,21 @@ export function mockTracks(
         status === 0 ? null : now - (1 + pick(20)) * 86_400_000,
         path,
         untagged || status === 1 ? `${pad(number)} - ${title}` : title,
-        untagged ? null : performer,
+        untagged ? null : sloppy.artist,
         untagged ? null : albumArtist,
-        untagged ? null : album,
-        untagged ? null : number,
+        untagged ? null : sloppy.album,
+        untagged ? null : sloppy.number,
         untagged ? null : 1,
-        untagged ? null : year,
-        untagged ? null : genre,
+        untagged ? null : sloppy.year,
+        untagged ? null : sloppy.genre,
         format,
         status === 1 ? null : durationMs,
-        status === 1 ? null : bitrate,
+        status === 1 ? null : sloppy.bitrate,
         Math.round((durationMs / 1000) * bitrate * 125),
         pick(10) === 0 ? null : now - pick(365) * 86_400_000,
         now - (30 + pick(3000)) * 86_400_000,
         covered && !untagged && status === 0,
+        untagged || status === 1,
       ]);
     }
   }

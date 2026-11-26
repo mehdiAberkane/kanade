@@ -44,6 +44,7 @@ function row(fields: {
     null,
     1_700_000_000_000,
     true,
+    false,
   ];
 }
 
