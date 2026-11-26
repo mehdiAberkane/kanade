@@ -61,8 +61,10 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   `?update=available`, `?update=offline` ou `?update=unpublished` (à jour sinon). L'état
   de la base aussi : `?db=restored`, `?db=empty`, `?db=newer` ou `?db=failed` (prête
   sinon), et les bibliothèques : `?libraries=empty` (trois d'exemple sinon, dont une
-  hors ligne et une avec des fichiers OneDrive). Ils se combinent
-  (`?update=available&db=restored`). Le faux sélecteur de dossier (`src/dev/mockLibraries.ts`)
+  hors ligne et une avec des fichiers OneDrive), et l'image de fond :
+  `?background=light` (une image claire, pour vérifier le texte dessus). Ils se combinent
+  (`?update=available&db=restored`). Le zoom de la fenêtre y est imité par le zoom CSS de
+  la page. Le faux sélecteur de dossier (`src/dev/mockLibraries.ts`)
   donne un dossier par clic, dont certains refusés, et les faux scans jouent leur
   progression en deux secondes. Les bibliothèques d'exemple totalisent 50 000 faux
   morceaux (`src/dev/mockTracks.ts`) ; les tests en prennent une fraction (`trackScale`).
@@ -202,6 +204,28 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   - une image est bornée avant décodage (32 Mo, 8 000 px) et une panique est rattrapée ;
   - l'interface demande 6 pochettes à la fois et en garde 400 ;
   - le faux backend les dessine en SVG.
+- Apparence (KAN-44, page « Apparence ») :
+  - les choix et leur effet sur `<html>` sont dans `src/lib/appearance.ts` : attributs
+    `data-theme`, `data-contrast`, `data-density`, `data-motion`, `data-backdrop`, et
+    variables CSS lues par `App.css` ;
+  - `AppearanceProvider` lit l'apparence au lancement, applique chaque changement tout de
+    suite et l'enregistre 300 ms plus tard. La dernière apparence est aussi dans le
+    stockage du navigateur, appliquée avant le premier rendu (`main.tsx`) ;
+  - côté Rust, un seul JSON dans `settings` (`library/appearance.rs`) ; une valeur
+    inconnue redevient celle par défaut. Les listes (thèmes, polices, vitesses) existent
+    des deux côtés : les garder pareilles ;
+  - couleur principale : chaque couleur proposée a sa variante claire et sombre, une
+    couleur libre est foncée ou éclaircie juste assez. Les tests vérifient le contraste
+    AA (AAA en contraste élevé) des boutons, liens et lignes sélectionnées ;
+  - sur une image ou le néon, les panneaux sont à 84 % (`--glass`) et le texte posé sur
+    le fond a un halo. Changer ces nombres = refaire le calcul de `appearance.test.ts` ;
+  - image de fond : un fichier `background.jpg` à côté de `kanade.db`, jamais dedans
+    (`background.rs`). L'interface la réduit (2 560 px, JPEG) et envoie ses octets ; Rust
+    refuse ce qui n'est pas un tel JPEG ;
+  - la hauteur des lignes des listes virtualisées vient de `ROW_HEIGHTS`, partagée avec la
+    CSS (`--track-row-height`) ;
+  - polices livrées (Atkinson Hyperlegible, Nunito) : paquets `@fontsource` sous OFL,
+    importés dans `main.tsx` (latin et latin-ext seulement).
 - Base de données (`src-tauri/src/store`) : un seul fichier, `kanade.db`, dans
   `%LOCALAPPDATA%\fr.devsecopsforce.kanade` (jamais un dossier synchronisé), ouvert au
   lancement. Tout y est précieux (morceaux et leurs identifiants, puis données de
