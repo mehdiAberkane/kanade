@@ -21,6 +21,7 @@ use super::libraries::{Library, LibraryId, Settings, TooBroad};
 use super::listing::{AlbumView, RevealTarget, TrackRow, TrackView};
 use super::scan::{LibraryError, ScanError};
 use super::scanner::{ScanEvents, ScanState, Scanner};
+use super::watcher::{Timing, WatchState, Watcher};
 use crate::store;
 
 /// A library as the interface shows it.
@@ -32,6 +33,8 @@ pub struct LibraryView {
     /// Tracks in the index under its folder, whatever their status.
     pub tracks: usize,
     pub scan: ScanState,
+    /// Whether its folder is watched (KAN-27).
+    pub watcher: WatchState,
 }
 
 /// The errors of a library's last scan: the ones kept, and how many more.
@@ -73,6 +76,8 @@ impl DropReport {
 
 pub struct LibraryService {
     index: Mutex<Index>,
+    /// Before the scanner: stopped first, it asks no more scans.
+    watcher: Watcher,
     scanner: Scanner,
     too_broad: TooBroad,
 }
@@ -86,10 +91,33 @@ impl LibraryService {
         events: impl ScanEvents,
         too_broad: TooBroad,
     ) -> Self {
-        Self {
+        Self::with_timing(index, scan_index, events, too_broad, Timing::default())
+    }
+
+    /// `new`, with the watcher's delays: the tests shorten them.
+    pub fn with_timing(
+        index: Index,
+        scan_index: Index,
+        events: impl ScanEvents,
+        too_broad: TooBroad,
+        timing: Timing,
+    ) -> Self {
+        let scanner = Scanner::start(scan_index, events);
+        let service = Self {
             index: Mutex::new(index),
-            scanner: Scanner::start(scan_index, events),
+            watcher: Watcher::start(scanner.queue(), timing),
+            scanner,
             too_broad,
+        };
+        service.rewatch();
+        service
+    }
+
+    /// Watches the libraries' folders as they now are.
+    fn rewatch(&self) {
+        // A database that no longer reads: the watches stay as they were.
+        if let Ok(libraries) = self.index().libraries() {
+            self.watcher.set_libraries(&libraries);
         }
     }
 
@@ -128,6 +156,7 @@ impl LibraryService {
             .into_iter()
             .map(|(library, tracks)| LibraryView {
                 scan: self.scanner.state_of(library.id),
+                watcher: self.watcher.state_of(library.id),
                 library,
                 tracks,
             })
@@ -139,6 +168,7 @@ impl LibraryService {
         let library = self
             .index()
             .add_library(root, &self.too_broad, store::now_ms())?;
+        self.rewatch();
         self.scanner.enqueue(library.id, false);
         Ok(library)
     }
@@ -170,6 +200,7 @@ impl LibraryService {
         let removed = self
             .scanner
             .without_scan_of(id, || self.index().remove_library(id))?;
+        self.rewatch();
         self.scanner.changed();
         Ok(removed)
     }
@@ -180,7 +211,21 @@ impl LibraryService {
         let library = self.scanner.without_scan_of(id, || {
             self.index().relocate_library(id, root, &self.too_broad)
         })?;
+        self.rewatch();
         self.scanner.enqueue(id, false);
+        Ok(library)
+    }
+
+    /// Watches the library's folder, or stops: it is then scanned every 30
+    /// minutes. Turned back on, it is scanned once, for what changed
+    /// meanwhile.
+    pub fn set_watch(&self, id: LibraryId, watch: bool) -> Result<Library, LibraryError> {
+        let library = self.index().set_library_watch(id, watch)?;
+        self.rewatch();
+        if watch {
+            self.scanner.enqueue(id, false);
+        }
+        self.scanner.changed();
         Ok(library)
     }
 
@@ -340,6 +385,7 @@ impl LibraryService {
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::Ordering;
+    use std::time::Duration;
 
     use super::*;
     use crate::library::libraries::ScanOutcome;
@@ -616,6 +662,114 @@ mod tests {
                 .errors_text(library.id)
                 .unwrap()
                 .ends_with("… et 500 autres erreurs, non gardées.\r\n")
+        );
+    }
+
+    /// KAN-27, as the ticket checks it: an album of 200 files copied into a
+    /// watched library comes as one update; its folder renamed, its tracks
+    /// keep their ids.
+    #[test]
+    fn a_watched_library_follows_a_copied_album_then_its_renamed_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        let opened = store::open(&data, store::now_ms()).unwrap();
+        let events = Recorder::default();
+        let service = LibraryService::with_timing(
+            opened.index,
+            store::open_writer(&data).unwrap(),
+            events.clone(),
+            TooBroad::default(),
+            Timing {
+                quiet: Duration::from_millis(500),
+                max_wait: Duration::from_secs(20),
+                fallback: Duration::from_secs(3600),
+            },
+        );
+        let music = dir.path().join("Musique");
+        fs::create_dir(&music).unwrap();
+        let library = service.add(&music).unwrap();
+        service.wait_idle();
+        assert_eq!(service.list().unwrap()[0].watcher, WatchState::Watching);
+
+        // Prepared aside, each with a title of its own, then copied in.
+        let staging = dir.path().join("Copie");
+        fs::create_dir(&staging).unwrap();
+        for i in 0..200 {
+            tagged_copy(
+                "tone.mp3",
+                &staging.join(format!("{i:03}.mp3")),
+                &format!("Piste {i}"),
+            );
+        }
+        let album = Path::new(&library.root).join("Album");
+        fs::create_dir(&album).unwrap();
+        for i in 0..200 {
+            let name = format!("{i:03}.mp3");
+            fs::copy(staging.join(&name), album.join(&name)).unwrap();
+        }
+        let wait = |count: usize| {
+            let end = std::time::Instant::now() + Duration::from_secs(20);
+            while events.updates.lock().unwrap().len() < count && std::time::Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            service.wait_idle();
+        };
+        wait(1);
+        std::thread::sleep(Duration::from_secs(1));
+        let updates = events.updates.lock().unwrap().clone();
+        assert_eq!(updates.len(), 1, "{updates:?}");
+        assert_eq!(updates[0].1.added, 200);
+        let ids = |folder: &Path| -> Vec<(String, TrackId)> {
+            let mut ids: Vec<_> = service
+                .index()
+                .known_under(folder)
+                .unwrap()
+                .into_values()
+                .map(|k| {
+                    (
+                        Path::new(&k.path)
+                            .file_name()
+                            .unwrap()
+                            .to_string_lossy()
+                            .into_owned(),
+                        k.id,
+                    )
+                })
+                .collect();
+            ids.sort();
+            ids
+        };
+        let before = ids(&album);
+        assert_eq!(before.len(), 200);
+
+        let renamed = Path::new(&library.root).join("Album (2020)");
+        fs::rename(&album, &renamed).unwrap();
+        wait(2);
+        assert_eq!(ids(&renamed), before);
+        assert!(ids(&album).is_empty());
+        let moved = &events.updates.lock().unwrap()[1].1;
+        assert_eq!((moved.added, moved.updated), (0, 200));
+    }
+
+    #[test]
+    fn a_library_turned_off_is_no_longer_watched_and_back_on_is_scanned() {
+        let s = setup();
+        let library = s.service.add(&music(&s, "Musique")).unwrap();
+        s.service.wait_idle();
+        let off = s.service.set_watch(library.id, false).unwrap();
+        assert!(!off.watch);
+        assert_eq!(s.service.list().unwrap()[0].watcher, WatchState::Off);
+        s.service.set_watch(library.id, true).unwrap();
+        s.service.wait_idle();
+        let view = &s.service.list().unwrap()[0];
+        assert_eq!(view.watcher, WatchState::Watching);
+        assert_eq!(
+            view.library.last_scan.as_ref().unwrap().unchanged,
+            FIXTURES.len()
+        );
+        assert_eq!(
+            s.service.set_watch(LibraryId(99), true).unwrap_err(),
+            LibraryError::NotFound
         );
     }
 }

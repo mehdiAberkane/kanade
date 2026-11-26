@@ -204,6 +204,16 @@ pub fn library_rename(
     libraries.get()?.rename(id, name)
 }
 
+/// Watches the library's folder, or stops (KAN-27).
+#[tauri::command(async)]
+pub fn library_set_watch(
+    id: LibraryId,
+    watch: bool,
+    libraries: State<'_, Libraries>,
+) -> Result<Library, LibraryError> {
+    libraries.get()?.set_watch(id, watch)
+}
+
 #[tauri::command(async)]
 pub fn library_remove(
     id: LibraryId,
@@ -710,6 +720,7 @@ mod tests {
             .invoke_handler(tauri::generate_handler![
                 libraries_list,
                 library_rename,
+                library_set_watch,
                 library_remove,
                 library_scan,
                 library_cancel_scan,
@@ -773,6 +784,21 @@ mod tests {
         )
         .unwrap();
         assert_eq!(renamed["name"], "Jazz");
+        let listed = invoke(&webview, "libraries_list", serde_json::json!({})).unwrap();
+        assert_eq!(listed[0]["watch"], true);
+        assert_eq!(
+            listed[0]["watcher"],
+            serde_json::json!({ "state": "watching" })
+        );
+        let unwatched = invoke(
+            &webview,
+            "library_set_watch",
+            serde_json::json!({ "id": id, "watch": false }),
+        )
+        .unwrap();
+        assert_eq!(unwatched["watch"], false);
+        let listed = invoke(&webview, "libraries_list", serde_json::json!({})).unwrap();
+        assert_eq!(listed[0]["watcher"], serde_json::json!({ "state": "off" }));
         assert_eq!(
             invoke(
                 &webview,
