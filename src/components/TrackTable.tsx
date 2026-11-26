@@ -18,9 +18,9 @@ import {
 } from "../lib/tracks";
 import { ColumnsMenu } from "./ColumnsMenu";
 import { TrackMenu } from "./TrackMenu";
+import { useRowHeight } from "../lib/useAppearance";
 
 /** Every row has this height: the table draws only the rows on screen. */
-const ROW_HEIGHT = 28;
 const OVERSCAN = 8;
 /** jsdom and a hidden window have no height: as many rows as a small screen. */
 const FALLBACK_HEIGHT = 600;
@@ -52,6 +52,7 @@ export function TrackTable({
   offline,
   label,
 }: Props) {
+  const rowHeight = useRowHeight("track");
   const scroller = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [height, setHeight] = useState(FALLBACK_HEIGHT);
@@ -73,9 +74,9 @@ export function TrackTable({
   const template = columns.map((c) => `${c.width}px`).join(" ");
   const width = columns.reduce((sum, c) => sum + c.width, 0);
 
-  const first = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
-  const last = Math.min(tracks.length, Math.ceil((scrollTop + height) / ROW_HEIGHT) + OVERSCAN);
-  const page = Math.max(1, Math.floor(height / ROW_HEIGHT) - 1);
+  const first = Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN);
+  const last = Math.min(tracks.length, Math.ceil((scrollTop + height) / rowHeight) + OVERSCAN);
+  const page = Math.max(1, Math.floor(height / rowHeight) - 1);
 
   // The viewport's height, followed as the window is resized.
   useEffect(() => {
@@ -97,14 +98,14 @@ export function TrackTable({
     const kept = anchor.current;
     const index = kept ? tracks.findIndex((t) => t.id === kept.id) : -1;
     if (kept && index >= 0 && index !== kept.index) {
-      scrollTo(scrollTop + (index - kept.index) * ROW_HEIGHT);
+      scrollTo(scrollTop + (index - kept.index) * rowHeight);
     }
     // On a new list only: a scroll of the user's is not undone. The anchor
     // itself follows every render, in the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- on a new list only, as said
   }, [tracks]);
   useLayoutEffect(() => {
-    const top = Math.floor(scrollTop / ROW_HEIGHT);
+    const top = Math.floor(scrollTop / rowHeight);
     anchor.current = top < tracks.length ? { id: tracks[top].id, index: top } : null;
   });
 
@@ -116,10 +117,10 @@ export function TrackTable({
 
   /** The row at `index` on screen, scrolling as little as needed. */
   function reveal(index: number) {
-    const rowTop = index * ROW_HEIGHT;
-    const visible = height - ROW_HEIGHT; // under the header
+    const rowTop = index * rowHeight;
+    const visible = height - rowHeight; // under the header
     if (rowTop < scrollTop) scrollTo(rowTop);
-    else if (rowTop + ROW_HEIGHT > scrollTop + visible) scrollTo(rowTop + ROW_HEIGHT - visible);
+    else if (rowTop + rowHeight > scrollTop + visible) scrollTo(rowTop + rowHeight - visible);
   }
 
   const indexOf = useMemo(() => new Map(tracks.map((t, i) => [t.id, i])), [tracks]);
@@ -196,7 +197,7 @@ export function TrackTable({
         select(next, here);
       }
       const box = event.currentTarget.getBoundingClientRect();
-      openMenu(box.left + 24, box.top + ROW_HEIGHT * (here + 2) - scrollTop, tracks[here], next);
+      openMenu(box.left + 24, box.top + rowHeight * (here + 2) - scrollTop, tracks[here], next);
     } else if (event.key === " ") {
       event.preventDefault();
       select(
@@ -314,7 +315,7 @@ export function TrackTable({
         <div
           className="track-body"
           role="rowgroup"
-          style={{ height: tracks.length * ROW_HEIGHT, width }}
+          style={{ height: tracks.length * rowHeight, width }}
         >
           {rows.map((track, k) => {
             const index = first + k;
@@ -333,7 +334,7 @@ export function TrackTable({
                 aria-selected={isSelected}
                 data-index={index}
                 className={classes.join(" ")}
-                style={{ top: index * ROW_HEIGHT, gridTemplateColumns: template }}
+                style={{ top: index * rowHeight, gridTemplateColumns: template }}
               >
                 {columns.map((c) => (
                   <div key={c.id} role="gridcell" className={c.numeric ? "num" : undefined}>

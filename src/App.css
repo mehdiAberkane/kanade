@@ -11,8 +11,13 @@
   --warning-bg: #fff4d6;
   --error-bg: #fde7e5;
   --danger-text: #ffffff;
+  /* Set from the Appearance page (src/lib/appearance.ts), with these defaults. */
+  --font: "Segoe UI", Inter, Avenir, Helvetica, Arial, sans-serif;
+  --track-row-height: 28px;
+  --artist-row-height: 56px;
 
-  font-family: "Segoe UI", Inter, Avenir, Helvetica, Arial, sans-serif;
+  color-scheme: light;
+  font-family: var(--font);
   font-size: 16px;
   line-height: 1.5;
   color: var(--text);
@@ -22,21 +27,57 @@
   -webkit-font-smoothing: antialiased;
 }
 
+/* The theme comes from the Appearance page: data-theme on <html>, set before
+   the first render (main.tsx). Until then, no white flash on a dark Windows. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --text: #f0f0f0;
-    --muted: #a8a8a8;
+  :root:not([data-theme]) {
     --bg: #1e1e1e;
-    --panel: #282828;
-    --border: #3c3c3c;
-    --accent: #a78bfa;
-    --accent-text: #141414;
-    --ok: #6fcf8a;
-    --error: #f28b82;
-    --warning-bg: #3d3420;
-    --error-bg: #3f2422;
-    --danger-text: #141414;
+    color-scheme: dark;
   }
+}
+
+:root[data-theme="dark"] {
+  --text: #f0f0f0;
+  --muted: #a8a8a8;
+  --bg: #1e1e1e;
+  --panel: #282828;
+  --border: #3c3c3c;
+  --accent: #a78bfa;
+  --accent-text: #141414;
+  --ok: #6fcf8a;
+  --error: #f28b82;
+  --warning-bg: #3d3420;
+  --error-bg: #3f2422;
+  --danger-text: #141414;
+
+  color-scheme: dark;
+}
+
+/* High contrast (Appearance page): black on white, or white on black, with
+   borders that show. The accent is made to reach 7:1 (appearance.ts). */
+:root[data-contrast="high"] {
+  --text: #000000;
+  --muted: #262626;
+  --bg: #ffffff;
+  --panel: #ffffff;
+  --border: #000000;
+  --ok: #0b5a24;
+  --error: #8c1d18;
+  --warning-bg: #fff0b3;
+  --error-bg: #ffe1de;
+}
+
+:root[data-contrast="high"][data-theme="dark"] {
+  --text: #ffffff;
+  --muted: #e0e0e0;
+  --bg: #000000;
+  --panel: #000000;
+  --border: #ffffff;
+  --ok: #8be3a5;
+  --error: #ffb4ab;
+  --warning-bg: #3d3000;
+  --error-bg: #4a1410;
+  --danger-text: #000000;
 }
 
 body {
@@ -587,7 +628,7 @@ main {
 
 .track-row {
   display: grid;
-  height: 28px;
+  height: var(--track-row-height);
   user-select: none;
 }
 
@@ -1021,7 +1062,7 @@ main {
   grid-template-columns: 44px minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.75rem;
-  height: 56px;
+  height: var(--artist-row-height);
   border-bottom: 1px solid var(--border);
   padding: 0 0.5rem;
   cursor: pointer;
@@ -1204,4 +1245,386 @@ main {
   font-size: 0.85rem;
   text-decoration: underline;
   cursor: pointer;
+}
+
+/* --- Appearance (KAN-44): density, motion, background, neon, zoom ------ */
+
+:root[data-density="compact"] .topbar {
+  padding: 0.3rem 1rem;
+}
+
+:root[data-density="compact"] .page {
+  padding: 1.25rem 1rem;
+}
+
+:root[data-density="compact"] .settings-section,
+:root[data-density="compact"] .library-card {
+  padding: 0.7rem 1rem;
+}
+
+:root[data-density="compact"] .settings-section + .settings-section {
+  margin-top: 0.6rem;
+}
+
+:root[data-density="compact"] .side-panel {
+  gap: 0.4rem;
+  padding: 0.5rem 0.4rem;
+}
+
+:root[data-density="compact"] .side-panel li button {
+  padding: 0.2rem 0.5rem;
+}
+
+/* Fewer animations: asked on the Appearance page, or by Windows. */
+:root[data-motion="reduce"] *,
+:root[data-motion="reduce"] *::before,
+:root[data-motion="reduce"] *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Behind the page: the background image under its veil, and the neon. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--bg);
+}
+
+.backdrop-image {
+  position: absolute;
+  inset: 0;
+  background-position: center;
+  background-size: cover;
+}
+
+.backdrop-veil {
+  position: absolute;
+  inset: 0;
+  background: var(--veil);
+}
+
+/* Two soft lights that sweep across like a wave. Only their transform moves:
+   no repaint of the page. */
+.neon span {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 80vmax;
+  height: 44vmax;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--neon) 85%, transparent),
+    color-mix(in srgb, var(--neon) 40%, transparent) 40%,
+    transparent 75%
+  );
+  animation: neon-wave var(--neon-duration) ease-in-out infinite;
+  will-change: transform;
+}
+
+.neon span + span {
+  width: 60vmax;
+  height: 32vmax;
+  opacity: 0.75;
+  animation-delay: calc(var(--neon-duration) / -2);
+  animation-direction: reverse;
+}
+
+:root[data-theme="light"] .neon span {
+  opacity: 0.7;
+}
+
+/* Still, in the middle, when animations are reduced. */
+:root[data-motion="reduce"] .neon span {
+  transform: translate(15vw, 25vh);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .neon span {
+    transform: translate(15vw, 25vh);
+  }
+}
+
+@keyframes neon-wave {
+  0% {
+    transform: translate(-70vmax, 55vh) rotate(-8deg);
+  }
+
+  25% {
+    transform: translate(-10vw, 10vh) rotate(6deg);
+  }
+
+  50% {
+    transform: translate(35vw, 60vh) rotate(-6deg);
+  }
+
+  75% {
+    transform: translate(70vw, 5vh) rotate(8deg);
+  }
+
+  100% {
+    transform: translate(110vw, 50vh) rotate(-8deg);
+  }
+}
+
+/* Over a background, the page lets it through: panels a little transparent
+   and blurred behind, so the text stays on a calm surface. Opaque enough
+   that grey text keeps 4.5:1 in the worst case: a white image under the
+   default veil, or the neon at its brightest (appearance.test.ts). */
+:root[data-backdrop] {
+  --glass: 84%;
+
+  background: transparent;
+}
+
+:root[data-backdrop] .app {
+  background: transparent;
+}
+
+:root[data-backdrop] .topbar,
+:root[data-backdrop] .side-panel,
+:root[data-backdrop] .track-scroll,
+:root[data-backdrop] .settings-section,
+:root[data-backdrop] .library-card,
+:root[data-backdrop] .empty,
+:root[data-backdrop] .search-field,
+:root[data-backdrop] .filter-panel {
+  background: color-mix(in srgb, var(--panel) var(--glass), transparent);
+  backdrop-filter: blur(14px);
+}
+
+/* The header of the list stays nearly solid: rows scroll under it. */
+:root[data-backdrop] .track-head {
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+}
+
+/* Text right on the background (titles, tabs, hints): a halo of the
+   theme's own colour around each letter. Not inside the panels. */
+:root[data-backdrop] main {
+  text-shadow:
+    0 0 2px var(--bg),
+    0 0 6px var(--bg),
+    0 0 12px var(--bg);
+}
+
+:root[data-backdrop]
+  :is(
+    .settings-section,
+    .library-card,
+    .track-scroll,
+    .side-panel,
+    .empty,
+    .search-field,
+    .filter-panel,
+    .btn,
+    .dialog,
+    .track-menu,
+    .columns-panel
+  ) {
+  text-shadow: none;
+}
+
+/* The zoom level, a moment after it changes. */
+.zoom-level {
+  position: fixed;
+  top: 4rem;
+  left: 50%;
+  z-index: 20;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  padding: 0.35rem 1rem;
+  background: var(--text);
+  color: var(--bg);
+  font-weight: 600;
+  pointer-events: none;
+}
+
+/* The Appearance page. */
+fieldset.settings-section {
+  min-inline-size: 0;
+  margin: 0;
+}
+
+fieldset.settings-section legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+}
+
+fieldset.settings-section legend + * {
+  clear: left;
+}
+
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr));
+  gap: 0.5rem;
+}
+
+.preset {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.15rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+  background: var(--bg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.preset[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.preset-swatch {
+  grid-row: span 2;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+}
+
+.preset-name {
+  font-weight: 600;
+}
+
+.preset-detail {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.choice {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.font-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.font-choice span:first-of-type {
+  font-size: 1.05rem;
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.swatch {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.swatch-color {
+  width: 1.6rem;
+  height: 1.6rem;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+}
+
+.swatch:has(input:checked) {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
+}
+
+.swatch:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.swatch:has(input:disabled) {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.swatch-free input {
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.background-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.background-preview {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 12rem;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg) center / cover;
+}
+
+.background-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.zoom-value {
+  min-width: 5rem;
+}
+
+/* Windows' own high contrast: its colours win; the selection and the chosen
+   swatch still show. */
+@media (forced-colors: active) {
+  .track-body .track-row.selected,
+  .side-panel li button[aria-current="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .swatch:has(input:checked),
+  .preset[aria-pressed="true"] {
+    outline: 3px solid Highlight;
+  }
+
+  .backdrop {
+    display: none;
+  }
 }

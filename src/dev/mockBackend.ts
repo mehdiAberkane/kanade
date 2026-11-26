@@ -2,7 +2,7 @@
 // where Tauri's IPC does not exist: Claude checks the interface in its own
 // browser instead of taking control of the PC. Loaded in development only,
 // outside Tauri (see main.tsx). Each new Rust command adds its answer here.
-import { mockIPC } from "@tauri-apps/api/mocks";
+import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import type { InvokeArgs } from "@tauri-apps/api/core";
 import type { DownloadEvent } from "@tauri-apps/plugin-updater";
 import type { DatabaseStatus } from "../lib/database";
@@ -12,6 +12,12 @@ import {
   NOT_MINE,
   type MockLibraries,
 } from "./mockLibraries";
+import {
+  backgroundScenario,
+  createMockAppearance,
+  lightPicture,
+  type MockAppearance,
+} from "./mockAppearance";
 
 export const MOCK_VERSION = "0.0.0-dev";
 export const MOCK_NEXT_VERSION = "0.0.1-dev";
@@ -52,9 +58,12 @@ export interface Scenarios {
   database?: DatabaseScenario;
   /** The fake libraries (mockLibraries.ts); sample ones by default. */
   libraries?: MockLibraries;
+  /** The fake appearance (mockAppearance.ts); the default one otherwise. */
+  appearance?: MockAppearance;
 }
 
 let sampleLibraries: MockLibraries | undefined;
+let sampleAppearance: MockAppearance | undefined;
 
 const MOCK_BROKEN = String.raw`C:\Users\you\AppData\Local\fr.devsecopsforce.kanade\kanade-broken-20261124-101500.db`;
 
@@ -139,6 +148,9 @@ export function handleMockCommand(
       return null;
 
     default: {
+      const appearance = scenarios.appearance ?? (sampleAppearance ??= createMockAppearance());
+      const looks = appearance.handle(cmd, args);
+      if (looks !== NOT_MINE) return looks;
       const libraries = scenarios.libraries ?? (sampleLibraries ??= createMockLibraries());
       const answer = libraries.handle(cmd, args);
       if (answer !== NOT_MINE) return answer;
@@ -153,7 +165,14 @@ export function installMockBackend(): void {
     update: updateScenario(window.location.search),
     database: databaseScenario(window.location.search),
     libraries: createMockLibraries({ scenario: librariesScenario(window.location.search) }),
+    appearance: createMockAppearance({
+      background:
+        backgroundScenario(window.location.search) === "light" ? lightPicture() : undefined,
+      zoomsPage: true,
+    }),
   };
+  // getCurrentWindow() and getCurrentWebview() need a window to name.
+  mockWindows("main");
   // The events (scan progress, libraries changed) go to the listeners too.
   mockIPC((cmd, args) => handleMockCommand(cmd, args, scenarios), { shouldMockEvents: true });
 }
