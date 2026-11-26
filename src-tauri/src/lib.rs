@@ -2,6 +2,7 @@
 // the memory-safety risks stay in the crates it depends on.
 #![forbid(unsafe_code)]
 
+mod background;
 mod commands;
 #[cfg(feature = "e2e")]
 mod e2e;
@@ -10,7 +11,7 @@ pub mod store;
 
 use std::path::{Path, PathBuf};
 
-use commands::{Covers, Libraries, TauriEvents};
+use commands::{Background, Covers, Libraries, TauriEvents};
 use library::{LibraryService, ScanEvents, TooBroad};
 use store::{DatabaseStatus, StoreError};
 use tauri::{AppHandle, Manager, Runtime};
@@ -99,6 +100,9 @@ pub fn run() {
                 data.as_deref().map_err(Clone::clone),
                 TauriEvents(app.handle().clone()),
             );
+            app.manage(Background(
+                data.as_ref().ok().map(|data| data.join("background.jpg")),
+            ));
             app.manage(status);
             app.manage(libraries);
             let covers = cache.join("cache").join("covers");
@@ -135,6 +139,11 @@ pub fn run() {
             commands::track_view_set,
             commands::album_view_get,
             commands::album_view_set,
+            commands::appearance_get,
+            commands::appearance_set,
+            commands::background_get,
+            commands::background_set,
+            commands::background_clear,
         ])
         .run(context)
         .expect("error while running tauri application");

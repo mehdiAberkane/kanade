@@ -16,8 +16,9 @@ use std::path::PathBuf;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State, WebviewWindow, Window, WindowEvent};
 
+use crate::background;
 use crate::library::{
-    AlbumView, CoverSize, DropReport, Library, LibraryError, LibraryId, LibraryService,
+    AlbumView, Appearance, CoverSize, DropReport, Library, LibraryError, LibraryId, LibraryService,
     LibraryView, RevealTarget, ScanErrors, ScanEvents, ScanProgress, Settings, TrackId, TrackRow,
     TrackView,
 };
@@ -25,6 +26,18 @@ use crate::library::{
 /// The folder of the covers' thumbnails, apart from the database
 /// (`%LOCALAPPDATA%\fr.devsecopsforce.kanade\cache\covers`).
 pub struct Covers(pub PathBuf);
+
+/// The background image's file (`background.rs`), in the data folder; none
+/// when that folder is unknown, as the database then is.
+pub struct Background(pub Option<PathBuf>);
+
+impl Background {
+    fn path(&self) -> Result<&std::path::Path, LibraryError> {
+        self.0.as_deref().ok_or_else(|| LibraryError::Io {
+            message: "Kanade has no data folder".to_owned(),
+        })
+    }
+}
 
 /// The libraries list or their scans changed: the interface reads it again.
 const LIBRARIES_CHANGED: &str = "libraries-changed";
@@ -238,6 +251,49 @@ pub fn settings_set(
     libraries: State<'_, Libraries>,
 ) -> Result<(), LibraryError> {
     libraries.get()?.save_settings(&settings)
+}
+
+/// How Kanade looks: the Appearance page (`library/appearance.rs`).
+#[tauri::command(async)]
+pub fn appearance_get(libraries: State<'_, Libraries>) -> Result<Appearance, LibraryError> {
+    libraries.get()?.appearance()
+}
+
+/// Keeps the appearance, made safe; returns what was kept.
+#[tauri::command(async)]
+pub fn appearance_set(
+    appearance: Appearance,
+    libraries: State<'_, Libraries>,
+) -> Result<Appearance, LibraryError> {
+    libraries.get()?.save_appearance(appearance)
+}
+
+/// The background image, as JPEG bytes: none (empty) without one.
+#[tauri::command(async)]
+pub fn background_get(
+    background: State<'_, Background>,
+) -> Result<tauri::ipc::Response, LibraryError> {
+    Ok(tauri::ipc::Response::new(background::read(
+        background.path()?,
+    )?))
+}
+
+/// A new background image: the JPEG the interface made from the picked one,
+/// as the raw body of the call. Never a path.
+#[tauri::command(async)]
+pub fn background_set(
+    request: tauri::ipc::Request<'_>,
+    background: State<'_, Background>,
+) -> Result<(), LibraryError> {
+    let tauri::ipc::InvokeBody::Raw(jpeg) = request.body() else {
+        return Err(LibraryError::NotAnImage);
+    };
+    background::write(background.path()?, jpeg)
+}
+
+#[tauri::command(async)]
+pub fn background_clear(background: State<'_, Background>) -> Result<(), LibraryError> {
+    background::clear(background.path()?)
 }
 
 /// A copy of the database before an update installs. Without a database
@@ -500,6 +556,101 @@ mod tests {
         assert_eq!(
             request(serde_json::json!({ "id": 9999, "size": "large" })).unwrap_err(),
             serde_json::json!({ "code": "track_not_found" })
+        );
+    }
+
+    /// The Appearance page's commands: its settings as JSON, the background
+    /// image as raw bytes both ways.
+    #[test]
+    fn the_appearance_and_its_background_go_through_tauri() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = tauri::test::mock_builder()
+            .invoke_handler(tauri::generate_handler![
+                appearance_get,
+                appearance_set,
+                background_get,
+                background_set,
+                background_clear,
+            ])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        app.manage(libraries(dir.path()));
+        app.manage(Background(Some(
+            dir.path().join("data").join("background.jpg"),
+        )));
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let call = |cmd: &str, body: tauri::ipc::InvokeBody| {
+            tauri::test::get_ipc_response(
+                &webview,
+                tauri::webview::InvokeRequest {
+                    cmd: cmd.into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "http://tauri.localhost".parse().unwrap(),
+                    body,
+                    headers: tauri::http::HeaderMap::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.to_owned(),
+                },
+            )
+        };
+        let background = || match call("background_get", serde_json::json!({}).into()).unwrap() {
+            tauri::ipc::InvokeResponseBody::Raw(bytes) => bytes,
+            tauri::ipc::InvokeResponseBody::Json(json) => panic!("not bytes: {json}"),
+        };
+
+        let first = invoke(&webview, "appearance_get", serde_json::json!({})).unwrap();
+        assert_eq!(first["theme"], "system");
+        let kept = invoke(
+            &webview,
+            "appearance_set",
+            serde_json::json!({ "appearance": { "theme": "dark", "zoom": 9000 } }),
+        )
+        .unwrap();
+        assert_eq!(
+            (kept["theme"].as_str(), kept["zoom"].as_u64()),
+            (Some("dark"), Some(300))
+        );
+        assert_eq!(
+            invoke(&webview, "appearance_get", serde_json::json!({})).unwrap(),
+            kept
+        );
+
+        assert!(background().is_empty());
+        let jpeg = crate::background::tests::jpeg(32, 24);
+        call("background_set", jpeg.clone().into()).unwrap();
+        assert_eq!(background(), jpeg);
+        let refused = serde_json::json!({ "code": "not_an_image" });
+        assert_eq!(
+            call("background_set", b"<svg/>".to_vec().into()).unwrap_err(),
+            refused
+        );
+        assert_eq!(
+            call(
+                "background_set",
+                serde_json::json!({ "path": "C:/Musique/fond.jpg" }).into()
+            )
+            .unwrap_err(),
+            refused,
+            "never a path"
+        );
+        assert_eq!(background(), jpeg);
+        invoke(&webview, "background_clear", serde_json::json!({})).unwrap();
+        assert!(background().is_empty());
+
+        // Without a data folder, as without a database.
+        let without = tauri::test::mock_builder()
+            .invoke_handler(tauri::generate_handler![background_get])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        without.manage(Background(None));
+        let webview = tauri::WebviewWindowBuilder::new(&without, "main", Default::default())
+            .build()
+            .unwrap();
+        assert_eq!(
+            invoke(&webview, "background_get", serde_json::json!({})).unwrap_err()["code"],
+            "io"
         );
     }
 

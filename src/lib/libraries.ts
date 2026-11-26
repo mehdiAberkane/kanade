@@ -64,6 +64,7 @@ export type LibraryError =
   | { code: "not_found" }
   | { code: "empty_name" }
   | { code: "track_not_found" }
+  | { code: "not_an_image" }
   | { code: "io"; message: string }
   | { code: "database"; message: string };
 
@@ -133,6 +134,8 @@ export function errorText(error: unknown): string {
       return "Une bibliothèque a besoin d'un nom.";
     case "track_not_found":
       return "Ce morceau n'est plus dans Kanade.";
+    case "not_an_image":
+      return "Cette image ne peut pas servir de fond : choisis une photo JPEG, PNG ou WebP.";
     case "io":
       return `Impossible d'écrire le fichier : ${error.message}`;
     case "database":

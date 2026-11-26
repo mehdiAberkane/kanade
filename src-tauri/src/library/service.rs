@@ -14,6 +14,7 @@ use std::time::SystemTime;
 
 use serde::Serialize;
 
+use super::appearance::Appearance;
 use super::covers::{self, CoverSize};
 use super::index::{Index, TrackId};
 use super::libraries::{Library, LibraryId, Settings, TooBroad};
@@ -302,6 +303,14 @@ impl LibraryService {
 
     pub fn save_album_view(&self, view: AlbumView) -> Result<AlbumView, LibraryError> {
         Ok(self.index().save_album_view(view)?)
+    }
+
+    pub fn appearance(&self) -> Result<Appearance, LibraryError> {
+        Ok(self.index().appearance()?)
+    }
+
+    pub fn save_appearance(&self, appearance: Appearance) -> Result<Appearance, LibraryError> {
+        Ok(self.index().save_appearance(appearance)?)
     }
 
     pub fn settings(&self) -> Result<Settings, LibraryError> {

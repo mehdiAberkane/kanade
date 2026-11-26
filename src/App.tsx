@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { AppearancePage } from "./components/AppearancePage";
+import { AppearanceProvider } from "./components/AppearanceProvider";
 import { DatabaseBanner } from "./components/DatabaseBanner";
 import { DropZone } from "./components/DropZone";
 import { LibrariesPage } from "./components/LibrariesPage";
@@ -10,7 +12,7 @@ import { statusLine } from "./lib/updater";
 import { useBackgroundUpdateCheck, useUpdater } from "./lib/useUpdater";
 import "./App.css";
 
-type Page = "tracks" | "libraries" | "settings";
+type Page = "tracks" | "libraries" | "appearance" | "settings";
 
 function App() {
   const [version, setVersion] = useState("");
@@ -31,45 +33,51 @@ function App() {
   }, []);
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <span className="brand">Kanade</span>
-        <nav className="nav">
-          <NavButton current={page} page="tracks" onSelect={setPage}>
-            Musique
-          </NavButton>
-          <NavButton current={page} page="libraries" onSelect={setPage}>
-            Bibliothèques
-          </NavButton>
-          <NavButton current={page} page="settings" onSelect={setPage}>
-            Réglages
-          </NavButton>
-        </nav>
-        <UpdateButton onOpen={confirm} />
-      </header>
-      <DatabaseBanner />
+    <AppearanceProvider>
+      <div className="app">
+        <header className="topbar">
+          <span className="brand">Kanade</span>
+          <nav className="nav">
+            <NavButton current={page} page="tracks" onSelect={setPage}>
+              Musique
+            </NavButton>
+            <NavButton current={page} page="libraries" onSelect={setPage}>
+              Bibliothèques
+            </NavButton>
+            <NavButton current={page} page="appearance" onSelect={setPage}>
+              Apparence
+            </NavButton>
+            <NavButton current={page} page="settings" onSelect={setPage}>
+              Réglages
+            </NavButton>
+          </nav>
+          <UpdateButton onOpen={confirm} />
+        </header>
+        <DatabaseBanner />
 
-      <main>
-        {page === "tracks" && (
-          <TracksPage
-            onManage={() => {
-              setPage("libraries");
+        <main>
+          {page === "tracks" && (
+            <TracksPage
+              onManage={() => {
+                setPage("libraries");
+              }}
+            />
+          )}
+          {page === "libraries" && <LibrariesPage />}
+          {page === "appearance" && <AppearancePage />}
+          {page === "settings" && <SettingsPage version={version} onInstall={confirm} />}
+        </main>
+        <DropZone />
+        {confirming && (
+          <UpdateDialog
+            version={version}
+            onClose={() => {
+              setConfirming(false);
             }}
           />
         )}
-        {page === "libraries" && <LibrariesPage />}
-        {page === "settings" && <SettingsPage version={version} onInstall={confirm} />}
-      </main>
-      <DropZone />
-      {confirming && (
-        <UpdateDialog
-          version={version}
-          onClose={() => {
-            setConfirming(false);
-          }}
-        />
-      )}
-    </div>
+      </div>
+    </AppearanceProvider>
   );
 }
 

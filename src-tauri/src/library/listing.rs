@@ -309,7 +309,7 @@ impl Index {
         Ok(view)
     }
 
-    fn save_json(&self, key: &str, value: &impl Serialize) -> rusqlite::Result<()> {
+    pub(super) fn save_json(&self, key: &str, value: &impl Serialize) -> rusqlite::Result<()> {
         let json = serde_json::to_string(value)
             .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         self.conn.execute(

@@ -144,6 +144,9 @@ pub enum LibraryError {
     EmptyName,
     /// No track has this id (left the index meanwhile).
     TrackNotFound,
+    /// What came as a background image is not a JPEG Kanade can show
+    /// (the interface sends one, reduced).
+    NotAnImage,
     /// A file could not be written (the export of the errors).
     Io {
         message: String,
@@ -167,6 +170,7 @@ impl fmt::Display for LibraryError {
             Self::NotFound => f.write_str("no such library"),
             Self::EmptyName => f.write_str("a library needs a name"),
             Self::TrackNotFound => f.write_str("no such track"),
+            Self::NotAnImage => f.write_str("not a JPEG image Kanade can show"),
             Self::Io { message } => write!(f, "file error: {message}"),
             Self::Database { message } => write!(f, "library database error: {message}"),
         }

@@ -21,6 +21,12 @@ describe("handleMockCommand", () => {
     expect(() => handleMockCommand("scan_library")).toThrow(/No mock/);
   });
 
+  it("keeps one sample appearance from a call to the next", () => {
+    const dark = { theme: "dark" };
+    handleMockCommand("appearance_set", { appearance: dark });
+    expect(handleMockCommand("appearance_get")).toMatchObject(dark);
+  });
+
   it("answers the update check for each scenario", async () => {
     expect(handleMockCommand("plugin:updater|check")).toBeNull();
     expect(handleMockCommand("plugin:updater|check", {}, { update: "available" })).toMatchObject({

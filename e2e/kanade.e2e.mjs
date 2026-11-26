@@ -113,3 +113,57 @@ it("lists the tracks of a library added, and keeps them after a restart", async 
   expect(await allTracks()).toEqual(tracks);
   expect(await sideLibraries()).toEqual(["Toute la musique", libraryName]);
 });
+
+/** The appearance as the page shows it and the window has it. */
+function looks() {
+  return kanade.run(`
+    return window.__TAURI_INTERNALS__.invoke("plugin:window|theme", { label: "main" }).then(
+      (window) => ({
+        page: document.documentElement.dataset.theme,
+        window,
+        pixels: devicePixelRatio,
+      }),
+    );
+  `);
+}
+
+// What only the real window shows: the title bar's theme and the zoom are
+// allowed (capabilities), and the appearance comes back from the database
+// (each session starts WebView2 with empty storage).
+it("keeps the theme and the zoom chosen, in the window too, after a restart", async () => {
+  await launch();
+  await kanade.click(`//button[normalize-space()="Apparence"]`);
+  await waitFor(
+    () => kanade.run(`return !document.querySelector('input[name="theme"]').disabled;`),
+    "the appearance read from the database",
+  );
+  const before = await looks();
+  await kanade.click(`//label[normalize-space()="Sombre"]`);
+  await kanade.click(`//button[@aria-label="Zoom avant"]`);
+  const zoomed = (now) => Math.abs(now.pixels / before.pixels - 1.1) < 0.02;
+  let now = before;
+  await waitFor(
+    async () => {
+      now = await looks();
+      return now.page === "dark" && now.window === "dark" && zoomed(now);
+    },
+    () => `a dark window zoomed to 110 %, got ${JSON.stringify({ before, now })}`,
+  );
+  await waitFor(
+    () =>
+      kanade.run(`return window.__TAURI_INTERNALS__.invoke("appearance_get").then(
+        (kept) => kept.theme === "dark" && kept.zoom === 110,
+      );`),
+    "the appearance kept in the database",
+  );
+
+  await kanade.quit();
+  await launch();
+  await waitFor(
+    async () => {
+      now = await looks();
+      return now.page === "dark" && now.window === "dark" && zoomed(now);
+    },
+    () => `the same after a restart, got ${JSON.stringify({ before, now })}`,
+  );
+});

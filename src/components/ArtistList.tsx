@@ -3,9 +3,9 @@ import type { KeyboardEvent, MouseEvent } from "react";
 import { artistLine, findArtist, type Artist } from "../lib/artists";
 import { formatNumber } from "../lib/libraries";
 import { Cover } from "./AlbumGrid";
+import { useRowHeight } from "../lib/useAppearance";
 
 /** Every row has this height: the list draws only the rows on screen. */
-const ROW_HEIGHT = 56;
 const OVERSCAN = 6;
 /** jsdom and a hidden window have no height: a small screen's. */
 const FALLBACK_HEIGHT = 600;
@@ -34,6 +34,7 @@ export function ArtistList({
   start,
   onOpen,
 }: Props) {
+  const rowHeight = useRowHeight("artist");
   const scroller = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(start.scrollTop);
   const [height, setHeight] = useState(FALLBACK_HEIGHT);
@@ -45,9 +46,9 @@ export function ArtistList({
   );
   const typed = useRef({ text: "", at: 0 });
   const current = Math.min(focus, artists.length - 1);
-  const first = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
-  const last = Math.min(artists.length, Math.ceil((scrollTop + height) / ROW_HEIGHT) + OVERSCAN);
-  const page = Math.max(1, Math.floor(height / ROW_HEIGHT) - 1);
+  const first = Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN);
+  const last = Math.min(artists.length, Math.ceil((scrollTop + height) / rowHeight) + OVERSCAN);
+  const page = Math.max(1, Math.floor(height / rowHeight) - 1);
 
   // The list's height, followed as the window is resized.
   useEffect(() => {
@@ -82,9 +83,9 @@ export function ArtistList({
   function moveFocus(index: number) {
     const next = Math.max(0, Math.min(artists.length - 1, index));
     setFocus(next);
-    const top = next * ROW_HEIGHT;
+    const top = next * rowHeight;
     if (top < scrollTop) scrollTo(top);
-    else if (top + ROW_HEIGHT > scrollTop + height) scrollTo(top + ROW_HEIGHT - height);
+    else if (top + rowHeight > scrollTop + height) scrollTo(top + rowHeight - height);
   }
 
   function onClick(event: MouseEvent) {
@@ -154,7 +155,7 @@ export function ArtistList({
         onKeyDown={onKeyDown}
         onClick={onClick}
       >
-        <div className="artist-body" style={{ height: count * ROW_HEIGHT }}>
+        <div className="artist-body" style={{ height: count * rowHeight }}>
           {artists.slice(first, last).map((artist, k) => {
             const index = first + k;
             const line = artistLine(artist);
@@ -171,7 +172,7 @@ export function ArtistList({
                 className={`artist-row${index === current ? " focused" : ""}${
                   artist.various || artist.unknown ? " apart" : ""
                 }`}
-                style={{ top: index * ROW_HEIGHT }}
+                style={{ top: index * rowHeight }}
               >
                 <Cover album={artist.cover} size={44} />
                 <span className="artist-name">{artist.name}</span>
