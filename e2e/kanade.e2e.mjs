@@ -2,7 +2,7 @@
 // tauri-driver (e2e/setup.mjs): a library added from the interface, its
 // tracks listed as the Rust side read them, and all of it found again after
 // a restart, from the database.
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, inject, it } from "vitest";
 import { Session, waitFor } from "./webdriver.mjs";
@@ -10,6 +10,7 @@ import { Session, waitFor } from "./webdriver.mjs";
 const data = inject("data");
 const files = inject("files");
 const libraryName = inject("library");
+const libraryPath = inject("libraryPath");
 const screenshots = inject("screenshots");
 
 let kanade = null;
@@ -165,5 +166,29 @@ it("keeps the theme and the zoom chosen, in the window too, after a restart", as
       return now.page === "dark" && now.window === "dark" && zoomed(now);
     },
     () => `the same after a restart, got ${JSON.stringify({ before, now })}`,
+  );
+});
+
+// KAN-27: a file copied into the library's folder while Kanade is open
+// comes into the list by itself, through the watch of the folder.
+it("shows a file copied into the library while it is open", async () => {
+  await launch();
+  await allTracks();
+  mkdirSync(join(libraryPath, "Ajouts"));
+  copyFileSync(join(libraryPath, files[0]), join(libraryPath, "Ajouts", files[0]));
+  let seen = [];
+  await waitFor(
+    async () => {
+      seen = await rows();
+      return seen.length === files.length + 1;
+    },
+    () => `${files.length + 1} tracks after the copy, ${seen.length} shown`,
+  );
+  await waitFor(
+    () => kanade.run(`return document.querySelector(".watch-news")?.textContent;`),
+    "the line saying what the watch brought",
+  );
+  expect(await kanade.run(`return document.querySelector(".watch-news").textContent;`)).toBe(
+    "1 morceau ajouté",
   );
 });

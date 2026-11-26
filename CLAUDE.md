@@ -62,7 +62,9 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   de la base aussi : `?db=restored`, `?db=empty`, `?db=newer` ou `?db=failed` (prête
   sinon), et les bibliothèques : `?libraries=empty` (trois d'exemple sinon, dont une
   hors ligne et une avec des fichiers OneDrive), et l'image de fond :
-  `?background=light` (une image claire, pour vérifier le texte dessus). Ils se combinent
+  `?background=light` (une image claire, pour vérifier le texte dessus), et la
+  surveillance des dossiers : `?watch=live` (12 fichiers arrivent dans « Musique » toutes
+  les 8 s). Ils se combinent
   (`?update=available&db=restored`). Le zoom de la fenêtre y est imité par le zoom CSS de
   la page. Le faux sélecteur de dossier (`src/dev/mockLibraries.ts`)
   donne un dossier par clic, dont certains refusés, et les faux scans jouent leur
@@ -154,6 +156,15 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   - Les scans tournent sur un fil à part (`library/scanner.rs`), un à la fois, avec
     progression (événements Tauri) et annulation. Retirer ou déplacer une bibliothèque
     passe par `Scanner::without_scan_of`, pour qu'aucun scan ne réécrive ses morceaux.
+  - Surveillance des dossiers (KAN-27, `library/watcher.rs`) : chaque bibliothèque est
+    surveillée pendant que Kanade est ouvert (réglage `watch`, activé par défaut). Les
+    changements sont regroupés (2 s de calme, 30 s au plus pendant une longue copie), puis
+    leurs dossiers relus sur le fil des scans par une mise à jour discrète
+    (`ScanQueue::enqueue_folders`) : pas de progression, le résumé du dernier scan
+    intact, l'événement `library-updated` seulement si quelque chose a changé. Une
+    bibliothèque non surveillée, ou que Windows ne sait pas surveiller, est scannée toutes
+    les 30 min. `notify` reste en 8.x : la 9 entraîne une crate sous licence Boost
+    (BSL-1.0), absente de `deny.toml`.
   - Les commandes se testent par l'IPC de Tauri (runtime de test, `tauri` avec `test` en
     dev-dependency) ; les dialogues passent par le trait `Dialogs`, simulé dans les tests.
     `build.rs` met le manifeste Windows (`windows-app-manifest.xml`) dans tous les
