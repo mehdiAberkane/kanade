@@ -39,6 +39,10 @@ tauri-plugin-process = "2.4.0"
 # side only: the interface never gives a path (commands.rs).
 rfd = { version = "0.17.2", default-features = false }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
+# The libraries' folders watched while Kanade is open (KAN-27,
+# library/watcher.rs). Kept on 8: notify 9 brings xxhash-rust, under the Boost
+# license (BSL-1.0), which deny.toml does not allow (chosen on 26/11/2026).
+notify = "8.2.0"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

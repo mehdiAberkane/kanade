@@ -9,7 +9,9 @@ import type { DatabaseStatus } from "../lib/database";
 import {
   createMockLibraries,
   librariesScenario,
+  LIVE_WATCH,
   NOT_MINE,
+  watchScenario,
   type MockLibraries,
 } from "./mockLibraries";
 import {
@@ -161,10 +163,16 @@ export function handleMockCommand(
 }
 
 export function installMockBackend(): void {
+  const libraries = createMockLibraries({ scenario: librariesScenario(window.location.search) });
+  if (watchScenario(window.location.search)) {
+    setInterval(() => {
+      libraries.simulateWatch(1, LIVE_WATCH.added);
+    }, LIVE_WATCH.everyMs);
+  }
   const scenarios: Scenarios = {
     update: updateScenario(window.location.search),
     database: databaseScenario(window.location.search),
-    libraries: createMockLibraries({ scenario: librariesScenario(window.location.search) }),
+    libraries,
     appearance: createMockAppearance({
       background:
         backgroundScenario(window.location.search) === "light" ? lightPicture() : undefined,

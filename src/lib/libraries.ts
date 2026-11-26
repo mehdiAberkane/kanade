@@ -46,12 +46,23 @@ export interface Library {
   root: string;
   addedMs: number;
   lastScan: LastScan | null;
+  /** Its folder is watched while Kanade is open (KAN-27). */
+  watch: boolean;
 }
+
+/** How a library's folder is watched (Rust: library::WatchState). */
+export type WatcherState =
+  | { state: "watching" }
+  /** Turned off: read again every 30 minutes. */
+  | { state: "off" }
+  /** Windows cannot watch it: read again every 30 minutes. */
+  | { state: "failed"; reason: string };
 
 export interface LibraryView extends Library {
   /** Tracks in the index under its folder. */
   tracks: number;
   scan: ScanState;
+  watcher: WatcherState;
 }
 
 export type LibraryError =
@@ -95,7 +106,44 @@ export const LIBRARY_EVENTS = {
   changed: "libraries-changed",
   progress: "library-scan-progress",
   dropped: "library-dropped",
+  /** What the watch of a folder changed (KAN-27). */
+  updated: "library-updated",
 } as const;
+
+/** What a watch update changed in a library. */
+export interface UpdatedEvent {
+  libraryId: number;
+  added: number;
+  /** Files read again, and files moved. */
+  updated: number;
+  /** Tracks whose file is gone. */
+  removed: number;
+}
+
+/** « 12 morceaux ajoutés · 1 mis à jour ». */
+export function updateLine(update: Omit<UpdatedEvent, "libraryId">): string {
+  const parts = [
+    update.added > 0 && count(update.added, "morceau ajouté", "morceaux ajoutés"),
+    update.updated > 0 && count(update.updated, "morceau mis à jour", "morceaux mis à jour"),
+    update.removed > 0 && count(update.removed, "morceau retiré", "morceaux retirés"),
+  ];
+  return parts.filter(Boolean).join(" · ");
+}
+
+/** What a library card says of the watch of its folder. */
+export function watchLine(watcher: WatcherState): string {
+  switch (watcher.state) {
+    case "watching":
+      return "Surveillé : ce qui change dans le dossier, hors de Kanade, s'affiche tout de suite.";
+    case "off":
+      return "Pas surveillé : Kanade relit le dossier toutes les 30 minutes.";
+    case "failed":
+      return (
+        `Windows ne peut pas surveiller ce dossier (${watcher.reason}) : Kanade le relit ` +
+        "toutes les 30 minutes, et réessaie de le surveiller."
+      );
+  }
+}
 
 export interface ProgressEvent {
   libraryId: number;

@@ -12,6 +12,7 @@ pub mod scan;
 pub mod scanner;
 pub mod service;
 pub mod track;
+pub mod watcher;
 
 pub use appearance::{Appearance, Neon};
 pub use covers::{CoverSize, CoverSource};
@@ -21,6 +22,7 @@ pub use listing::{AlbumView, RevealTarget, TrackRow, TrackView};
 pub use scan::{
     KEEP_GONE_MS, LibraryError, ScanControl, ScanError, ScanProgress, ScanReport, scan_folder,
 };
-pub use scanner::{ScanEvents, ScanState, Scanner};
+pub use scanner::{ScanEvents, ScanQueue, ScanState, Scanner, WatchUpdate};
 pub use service::{DropReport, LibraryService, LibraryView, ScanErrors};
 pub use track::{FileStamp, Track, is_audio_file, read_track};
+pub use watcher::{Timing, WatchSink, WatchState, Watcher};

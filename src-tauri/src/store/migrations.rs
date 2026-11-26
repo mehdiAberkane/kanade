@@ -14,7 +14,7 @@ use rusqlite::Connection;
 use super::{StoreError, user_version};
 
 /// The version the steps below lead to.
-pub const LATEST_VERSION: i32 = 5;
+pub const LATEST_VERSION: i32 = 6;
 
 struct Migration {
     version: i32,
@@ -121,6 +121,12 @@ CREATE TABLE settings (
     Migration {
         version: 5,
         sql: "ALTER TABLE tracks ADD COLUMN added_ms INTEGER;",
+    },
+    // KAN-27: whether each library's folder is watched while Kanade is open;
+    // on for every library, those added before included.
+    Migration {
+        version: 6,
+        sql: "ALTER TABLE libraries ADD COLUMN watch INTEGER NOT NULL DEFAULT 1;",
     },
 ];
 
@@ -273,6 +279,22 @@ mod tests {
             .query_row("SELECT added_ms FROM tracks", [], |r| r.get(0))
             .unwrap();
         assert_eq!(added, None);
+    }
+
+    #[test]
+    fn step_6_watches_the_libraries_added_before() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate_to(&mut conn, 5).unwrap();
+        conn.execute_batch(
+            r"INSERT INTO libraries (name, root, root_key, added_ms)
+              VALUES ('Musique', 'D:\Musique', 'd:\musique', 1);",
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let watch: bool = conn
+            .query_row("SELECT watch FROM libraries", [], |r| r.get(0))
+            .unwrap();
+        assert!(watch);
     }
 
     #[test]

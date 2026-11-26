@@ -20,7 +20,7 @@ use crate::background;
 use crate::library::{
     AlbumView, Appearance, CoverSize, DropReport, Library, LibraryError, LibraryId, LibraryService,
     LibraryView, RevealTarget, ScanErrors, ScanEvents, ScanProgress, Settings, TrackId, TrackRow,
-    TrackView,
+    TrackView, WatchUpdate,
 };
 
 /// The folder of the covers' thumbnails, apart from the database
@@ -45,6 +45,8 @@ const LIBRARIES_CHANGED: &str = "libraries-changed";
 const SCAN_PROGRESS: &str = "library-scan-progress";
 /// What became of the folders dropped on the window.
 const LIBRARY_DROPPED: &str = "library-dropped";
+/// What a watch update changed in a library (KAN-27).
+const LIBRARY_UPDATED: &str = "library-updated";
 
 /// The libraries, absent when the database did not open (the interface
 /// already says so).
@@ -68,6 +70,14 @@ struct ProgressEvent<'a> {
     progress: &'a ScanProgress,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdatedEvent<'a> {
+    library_id: LibraryId,
+    #[serde(flatten)]
+    update: &'a WatchUpdate,
+}
+
 impl<R: Runtime> ScanEvents for TauriEvents<R> {
     // An event the window cannot get (closing) has no one left to tell.
     fn changed(&self) {
@@ -80,6 +90,16 @@ impl<R: Runtime> ScanEvents for TauriEvents<R> {
             ProgressEvent {
                 library_id: library,
                 progress,
+            },
+        );
+    }
+
+    fn updated(&self, library: LibraryId, update: &WatchUpdate) {
+        let _ = self.0.emit(
+            LIBRARY_UPDATED,
+            UpdatedEvent {
+                library_id: library,
+                update,
             },
         );
     }
@@ -182,6 +202,16 @@ pub fn library_rename(
     libraries: State<'_, Libraries>,
 ) -> Result<Library, LibraryError> {
     libraries.get()?.rename(id, name)
+}
+
+/// Watches the library's folder, or stops (KAN-27).
+#[tauri::command(async)]
+pub fn library_set_watch(
+    id: LibraryId,
+    watch: bool,
+    libraries: State<'_, Libraries>,
+) -> Result<Library, LibraryError> {
+    libraries.get()?.set_watch(id, watch)
 }
 
 #[tauri::command(async)]
@@ -690,6 +720,7 @@ mod tests {
             .invoke_handler(tauri::generate_handler![
                 libraries_list,
                 library_rename,
+                library_set_watch,
                 library_remove,
                 library_scan,
                 library_cancel_scan,
@@ -753,6 +784,21 @@ mod tests {
         )
         .unwrap();
         assert_eq!(renamed["name"], "Jazz");
+        let listed = invoke(&webview, "libraries_list", serde_json::json!({})).unwrap();
+        assert_eq!(listed[0]["watch"], true);
+        assert_eq!(
+            listed[0]["watcher"],
+            serde_json::json!({ "state": "watching" })
+        );
+        let unwatched = invoke(
+            &webview,
+            "library_set_watch",
+            serde_json::json!({ "id": id, "watch": false }),
+        )
+        .unwrap();
+        assert_eq!(unwatched["watch"], false);
+        let listed = invoke(&webview, "libraries_list", serde_json::json!({})).unwrap();
+        assert_eq!(listed[0]["watcher"], serde_json::json!({ "state": "off" }));
         assert_eq!(
             invoke(
                 &webview,

@@ -287,6 +287,33 @@ describe("Tracks page", () => {
   });
 });
 
+describe("The watch of the folders", () => {
+  it("says what it brought, adds up what comes close, then lets it go", async () => {
+    backend();
+    const app = await renderApp();
+    await grid(app);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const news = () => app.screen.getAllByRole("status").find((s) => s.className === "watch-news");
+    expect(news()?.textContent).toBe("");
+    const updated = (libraryId: number, added: number, removed = 0) =>
+      app.act(() => emit("library-updated", { libraryId, added, updated: 0, removed }));
+    await updated(1, 12);
+    expect(news()?.textContent).toBe("12 morceaux ajoutés");
+    await app.act(() => vi.advanceTimersByTimeAsync(3000));
+    await updated(2, 3, 1);
+    expect(news()?.textContent).toBe("15 morceaux ajoutés · 1 morceau retiré");
+    // Six seconds after the last one.
+    await app.act(() => vi.advanceTimersByTimeAsync(5000));
+    expect(news()?.textContent).not.toBe("");
+    await app.act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(news()?.textContent).toBe("");
+    // One on the way when the page goes: dropped.
+    await updated(1, 1);
+    app.cleanup();
+    await vi.advanceTimersByTimeAsync(6000);
+  });
+});
+
 describe("Sort and columns", () => {
   it("sorts by a column, then the other way, and keeps the choice", async () => {
     const { calls } = backend();

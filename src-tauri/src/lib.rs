@@ -123,6 +123,7 @@ pub fn run() {
             commands::libraries_list,
             commands::library_add,
             commands::library_rename,
+            commands::library_set_watch,
             commands::library_remove,
             commands::library_scan,
             commands::library_cancel_scan,

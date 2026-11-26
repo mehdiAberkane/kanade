@@ -31,6 +31,10 @@ pub struct Library {
     pub added_ms: i64,
     /// How the last scan ended; `None` before the first one.
     pub last_scan: Option<LastScan>,
+    /// Its folder is watched while Kanade is open (KAN-27): on by default,
+    /// to turn off on a slow network drive, which is then scanned every 30
+    /// minutes.
+    pub watch: bool,
 }
 
 /// Characters kept in a library's name.
@@ -180,7 +184,7 @@ impl Index {
     /// Every library, by name.
     pub fn libraries(&self) -> rusqlite::Result<Vec<Library>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, root, added_ms, last_scan FROM libraries \
+            "SELECT id, name, root, added_ms, last_scan, watch FROM libraries \
              ORDER BY name COLLATE NOCASE, id",
         )?;
         stmt.query_map([], library_from_row)?.collect()
@@ -189,7 +193,7 @@ impl Index {
     pub fn library(&self, id: LibraryId) -> rusqlite::Result<Option<Library>> {
         self.conn
             .query_row(
-                "SELECT id, name, root, added_ms, last_scan FROM libraries WHERE id = ?1",
+                "SELECT id, name, root, added_ms, last_scan, watch FROM libraries WHERE id = ?1",
                 [id.0],
                 library_from_row,
             )
@@ -215,6 +219,7 @@ impl Index {
             root,
             added_ms: now_ms,
             last_scan: None,
+            watch: true,
         })
     }
 
@@ -257,6 +262,19 @@ impl Index {
         self.conn.execute(
             "UPDATE libraries SET name = ?2 WHERE id = ?1",
             params![id.0, name],
+        )?;
+        self.library(id)?.ok_or(LibraryError::NotFound)
+    }
+
+    /// Whether the library's folder is watched (KAN-27).
+    pub fn set_library_watch(
+        &mut self,
+        id: LibraryId,
+        watch: bool,
+    ) -> Result<Library, LibraryError> {
+        self.conn.execute(
+            "UPDATE libraries SET watch = ?2 WHERE id = ?1",
+            params![id.0, watch],
         )?;
         self.library(id)?.ok_or(LibraryError::NotFound)
     }
@@ -416,6 +434,7 @@ fn library_from_row(r: &Row<'_>) -> rusqlite::Result<Library> {
         added_ms: r.get(3)?,
         // A summary that no longer reads is only not shown.
         last_scan: last_scan.and_then(|json| serde_json::from_str(&json).ok()),
+        watch: r.get(5)?,
     })
 }
 
@@ -636,6 +655,22 @@ mod tests {
         assert_eq!(long.name.chars().count(), MAX_NAME_CHARS);
         assert_eq!(
             index.rename_library(LibraryId(99), "X").unwrap_err(),
+            LibraryError::NotFound
+        );
+    }
+
+    #[test]
+    fn a_library_is_watched_until_told_otherwise() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut index = Index::open_in_memory().unwrap();
+        let library = add(&mut index, &music(&dir.path().join("Musique"))).unwrap();
+        assert!(library.watch);
+        assert!(index.library(library.id).unwrap().unwrap().watch);
+        assert!(!index.set_library_watch(library.id, false).unwrap().watch);
+        assert!(!index.libraries().unwrap()[0].watch);
+        assert!(index.set_library_watch(library.id, true).unwrap().watch);
+        assert_eq!(
+            index.set_library_watch(LibraryId(99), false).unwrap_err(),
             LibraryError::NotFound
         );
     }
@@ -929,10 +964,12 @@ mod tests {
                 },
                 2,
             )),
+            watch: false,
         };
         let json = serde_json::to_value(&library).unwrap();
         assert_eq!(json["id"], 7);
         assert_eq!(json["addedMs"], 1);
+        assert_eq!(json["watch"], false);
         assert_eq!(json["lastScan"]["endedMs"], 2);
         assert_eq!(json["lastScan"]["onlineOnly"], 0);
         assert_eq!(

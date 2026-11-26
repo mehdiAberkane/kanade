@@ -1628,3 +1628,31 @@ fieldset.settings-section legend + * {
     display: none;
   }
 }
+
+/* --- Watching the folders (KAN-27) ------------------------------------- */
+
+.watch-row {
+  margin: 0.5rem 0 0.25rem;
+}
+
+.library-card .hint.watch-failed {
+  color: var(--error);
+}
+
+/* The tabs, and on their right what the watch just brought. */
+.view-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+}
+
+.view-bar .view-tabs {
+  flex: 1;
+}
+
+.watch-news {
+  margin: 0 0 0.5rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}

@@ -1,16 +1,21 @@
 // The libraries as the Rust side lists them, kept up to date by its events:
 // the list is read again when it changes, and a running scan's progress
 // arrives a few times a second.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   errorText,
   LIBRARY_EVENTS,
+  updateLine,
   type LibraryView,
   type ProgressEvent,
   type ScanProgress,
+  type UpdatedEvent,
 } from "./libraries";
+
+/** How long « 12 morceaux ajoutés » stays. */
+const NEWS_MS = 6000;
 
 /** Listens to Tauri events until the component goes away. */
 export function useTauriEvents(subscribe: () => Promise<UnlistenFn>[]) {
@@ -89,4 +94,43 @@ export function useLibraries() {
       : library;
   });
   return { libraries: shown ?? null, error };
+}
+
+/**
+ * What the watch of the folders changed lately (KAN-27), as a line:
+ * « 12 morceaux ajoutés ». Updates coming close together add up; the line
+ * goes `NEWS_MS` after the last one.
+ */
+export function useWatchNews(): string | null {
+  const [news, setNews] = useState<Omit<UpdatedEvent, "libraryId"> | null>(null);
+  const hiding = useRef<number | null>(null);
+
+  useTauriEvents(
+    useCallback(
+      () => [
+        listen<UpdatedEvent>(LIBRARY_EVENTS.updated, ({ payload }) => {
+          setNews((before) => ({
+            added: (before?.added ?? 0) + payload.added,
+            updated: (before?.updated ?? 0) + payload.updated,
+            removed: (before?.removed ?? 0) + payload.removed,
+          }));
+          if (hiding.current !== null) window.clearTimeout(hiding.current);
+          hiding.current = window.setTimeout(() => {
+            hiding.current = null;
+            setNews(null);
+          }, NEWS_MS);
+        }),
+      ],
+      [],
+    ),
+  );
+
+  useEffect(
+    () => () => {
+      if (hiding.current !== null) window.clearTimeout(hiding.current);
+    },
+    [],
+  );
+
+  return news && updateLine(news);
 }

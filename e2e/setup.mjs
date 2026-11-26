@@ -160,6 +160,7 @@ export default async function setup({ provide }) {
   provide("driver", DRIVER);
   provide("files", files);
   provide("library", "Bibliothèque e2e");
+  provide("libraryPath", library);
   provide("screenshots", screenshots);
   return stop;
 }
