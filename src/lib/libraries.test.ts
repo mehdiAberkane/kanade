@@ -72,6 +72,10 @@ describe("errorText", () => {
     ],
     [{ code: "not_found" }, "Cette bibliothèque n'existe plus."],
     [{ code: "empty_name" }, "Une bibliothèque a besoin d'un nom."],
+    [
+      { code: "not_an_image" },
+      "Cette image ne peut pas servir de fond : choisis une photo JPEG, PNG ou WebP.",
+    ],
     [{ code: "io", message: "denied" }, "Impossible d'écrire le fichier : denied"],
     [{ code: "database", message: "locked" }, "Erreur de la base de Kanade : locked"],
   ])("tells %o in French", (error, text) => {
