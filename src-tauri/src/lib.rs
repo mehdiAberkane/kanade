@@ -81,6 +81,10 @@ fn folders<R: Runtime>(_: &AppHandle<R>) -> (Result<PathBuf, String>, PathBuf) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let context = tauri::generate_context!();
+    // Under the Edge WebDriver, its options for WebView2 (e2e.rs).
+    #[cfg(feature = "e2e")]
+    let context = e2e::with_webdriver_options(context);
     let builder = tauri::Builder::default();
     // In-app updates from GitHub Releases: tauri.conf.json, plugins.updater.
     // Not in the end-to-end test build (e2e.rs).
@@ -132,7 +136,7 @@ pub fn run() {
             commands::album_view_get,
             commands::album_view_set,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 }
 

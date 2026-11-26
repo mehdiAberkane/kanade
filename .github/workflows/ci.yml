@@ -165,12 +165,12 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
 
-      # Its own cache entry (the key includes the job): the e2e build and
-      # tauri-driver.
+      # Its own cache entry (the key includes the job): the e2e build, its
+      # tests and tauri-driver.
       - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: src-tauri -> target
-          key: v1
+          key: v2
 
       - run: npm ci --ignore-scripts
 
@@ -183,6 +183,13 @@ jobs:
       # that matches WebView2 comes from Microsoft, its signature checked.
       - name: End-to-end tests
         run: npm run test:e2e
+
+      # The e2e build's own code (src-tauri/src/e2e.rs) only compiles with
+      # its feature, which the rust job's tests leave out. After the step
+      # above, which built the interface it embeds.
+      - name: Tests of the e2e build's code
+        working-directory: src-tauri
+        run: cargo test --locked --features e2e --lib e2e
 
       # TEMPORARY (KAN-18): why the WebView2 session does not start here.
       - name: Diagnose

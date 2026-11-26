@@ -110,7 +110,10 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
 - La vraie app se vérifie par les tests de bout en bout (`e2e/`, job `e2e` de la CI) : le
   build `e2e` (`src-tauri/src/e2e.rs`, jamais publié) prend sa base dans
   `KANADE_E2E_DATA`, répond au sélecteur de dossier par `KANADE_E2E_LIBRARY`, n'a pas de
-  mises à jour et a son propre identifiant (`tauri.e2e.conf.json`). Le test s'arrête
+  mises à jour et a son propre identifiant (`tauri.e2e.conf.json`). Il passe lui-même à
+  WebView2 les options du pilote Edge (`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`), que
+  WebView2 ignore sur les runners GitHub ; ce code ne compile qu'avec l'option `e2e`, ses
+  tests (`cargo test --features e2e --lib e2e`) tournent dans le job `e2e`. Le test s'arrête
   avant tout clic si la base n'apparaît pas dans son dossier (un autre build ouvrirait
   la vraie). Un parcours que seule la vraie app montre (Rust et interface ensemble, base
   gardée après une relance) y ajoute un scénario ; les écrans eux-mêmes restent aux
