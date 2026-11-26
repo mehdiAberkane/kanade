@@ -4,6 +4,7 @@
 
 pub mod appearance;
 pub mod covers;
+pub mod health;
 pub mod index;
 pub mod libraries;
 pub mod listing;
