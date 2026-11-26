@@ -58,7 +58,8 @@ const tree = (dir) =>
 const reg = (key) => run(join(SYSTEM32, "reg.exe"), ["query", key, "/s"]);
 
 console.log("== 1. Policies and versions");
-console.log("TEMP:", process.env.TEMP, "| TMP:", process.env.TMP, "| user:", process.env.USERNAME);
+// Where msedgedriver creates its user data folder (TMP first, then TEMP).
+console.log("TEMP:", process.env.TEMP, "| TMP:", process.env.TMP);
 console.log(reg(String.raw`HKLM\SOFTWARE\Policies\Microsoft\Edge`));
 console.log(reg(String.raw`HKCU\SOFTWARE\Policies\Microsoft\Edge`));
 console.log(reg(String.raw`HKLM\SOFTWARE\Policies\Microsoft\EdgeUpdate`));
