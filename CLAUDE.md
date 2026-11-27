@@ -220,6 +220,23 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   `docs/sante.md`, à garder pareilles qu'Ongaku (ONG-59). Les signalements ignorés vont
   dans `settings` (`health_ignored`). Mesuré sur 50 000 morceaux : albums en 95 ms, puis
   contrôles en 100 ms, lancés juste après l'affichage de la page.
+- Lire avec un lecteur installé (KAN-45, `src-tauri/src/player/`, `src/lib/player.ts`) :
+  - les lecteurs sont lus dans le registre (`player/registry.rs`, crate
+    `windows-registry` déjà amenée par Tauri) : `RegisteredApplications`, les
+    « Ouvrir avec » des extensions audio, et le choix de Windows (`UserChoice`) ;
+  - le registre et le lancement passent par des traits (`Registry`, `Launcher`),
+    simulés dans les tests ; aucun vrai lecteur ne démarre en test ;
+  - Rust lance le programme lui-même, chaque fichier en argument séparé : jamais de
+    `cmd /c`. Au-delà de 32 000 caractères, une liste M3U8 dans `cache\playlists` ;
+  - les options des lecteurs connus (VLC, foobar2000, AIMP, MusicBee, Winamp) sont
+    dans `KNOWN` (`player/mod.rs`), à vérifier sur le PC ;
+  - une app du Store n'a pas de .exe : le premier morceau s'ouvre par l'Explorateur ;
+  - icônes par la crate `file_icon_provider` (MIT) : le code `unsafe` reste dans la
+    crate ;
+  - l'interface désigne un lecteur par son `id` (jamais un chemin), un morceau par son
+    identifiant. Le choix est gardé dans `settings` (`library/playback.rs`) ;
+  - double clic : la ligne ; Entrée et le menu : la sélection. Des fichiers « en
+    ligne uniquement » : l'interface demande avant (`allowOnline`).
 - Statistiques (KAN-36, page « Statistiques », `src/lib/stats.ts`) :
   - calculées dans l'interface, comme la Santé, sur les lignes de la liste : mêmes
     albums et artistes que les onglets. Les fichiers introuvables ne sont pas comptés ;

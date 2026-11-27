@@ -22,6 +22,7 @@ use super::libraries::{Library, LibraryId, Settings, TooBroad};
 use super::listing::{AlbumView, RevealTarget, TrackRow, TrackView};
 use super::marks;
 use super::paths;
+use super::playback::PlayerChoice;
 use super::scan::{LibraryError, ScanError};
 use super::scanner::{ScanEvents, ScanState, Scanner};
 use super::watcher::{Timing, WatchState, Watcher};
@@ -230,6 +231,29 @@ impl LibraryService {
         }
         self.scanner.changed();
         Ok(library)
+    }
+
+    /// The files of these tracks, in this order (KAN-45); an id no longer
+    /// in the index is refused.
+    pub fn track_paths(&self, ids: &[TrackId]) -> Result<Vec<String>, LibraryError> {
+        let index = self.index();
+        ids.iter()
+            .map(|id| {
+                Ok(index
+                    .track(*id)?
+                    .ok_or(LibraryError::TrackNotFound)?
+                    .track
+                    .path)
+            })
+            .collect()
+    }
+
+    pub fn player_choice(&self) -> Result<PlayerChoice, LibraryError> {
+        Ok(self.index().player_choice()?)
+    }
+
+    pub fn save_player_choice(&self, choice: &PlayerChoice) -> Result<(), LibraryError> {
+        Ok(self.index().save_player_choice(choice)?)
     }
 
     pub fn library(&self, id: LibraryId) -> Result<Library, LibraryError> {

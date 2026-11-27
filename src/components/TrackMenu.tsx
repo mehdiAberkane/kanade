@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { folderName, folderUnder } from "../lib/exclusions";
 import { errorText } from "../lib/libraries";
 import { MAX_RATING, ratingText, useMarks } from "../lib/marks";
+import { usePlayback } from "../lib/player";
 import type { Track } from "../lib/tracks";
 
 interface Props {
@@ -31,6 +32,7 @@ export function TrackMenu({ x, y, tracks, focus, root, onClose }: Props) {
   /** Asking before the focused track's folder is left out (KAN-43). */
   const [excluding, setExcluding] = useState(false);
   const mark = useMarks();
+  const playback = usePlayback();
   const ids = tracks.map((t) => t.id);
   const allFavorite = tracks.every((t) => t.favorite);
   const several = tracks.length > 1 ? `les ${tracks.length} morceaux ` : "";
@@ -119,6 +121,32 @@ export function TrackMenu({ x, y, tracks, focus, root, onClose }: Props) {
         </div>
       ) : (
         <>
+          {playback && (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  playback.play(ids, false);
+                  onClose();
+                }}
+              >
+                Lire avec {playback.name}
+              </button>
+              {playback.enqueue && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    playback.play(ids, true);
+                    onClose();
+                  }}
+                >
+                  Ajouter à la file de {playback.name}
+                </button>
+              )}
+            </>
+          )}
           <button
             type="button"
             role="menuitem"
@@ -159,6 +187,18 @@ export function TrackMenu({ x, y, tracks, focus, root, onClose }: Props) {
           >
             Afficher dans l'Explorateur
           </button>
+          {playback && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                playback.openWith(focus.id);
+                onClose();
+              }}
+            >
+              Ouvrir avec…
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"

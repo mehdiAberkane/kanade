@@ -90,6 +90,23 @@ describe("errorText", () => {
       { code: "not_in_library", name: "M" },
       "Ce dossier n'est pas dans la bibliothèque « M » : choisis un de ses sous-dossiers.",
     ],
+    [
+      { code: "file_gone", name: "a.mp3" },
+      "Ce fichier n'est plus sur le disque : a.mp3. Rien n'a été lancé.",
+    ],
+    [
+      { code: "path_too_long", name: "a.mp3" },
+      "Le chemin de a.mp3 est trop long pour la plupart des lecteurs : raccourcis le nom de son dossier.",
+    ],
+    [
+      { code: "player_not_found" },
+      "Ce lecteur est introuvable : il a peut-être été désinstallé ou déplacé.",
+    ],
+    [
+      { code: "not_a_program" },
+      "Ce fichier n'est pas un programme : choisis le .exe d'un lecteur.",
+    ],
+    [{ code: "launch_failed", message: "refusé" }, "Le lecteur n'a pas démarré : refusé"],
     [{ code: "io", message: "denied" }, "Erreur de fichier : denied"],
     [{ code: "database", message: "locked" }, "Erreur de la base de Kanade : locked"],
   ])("tells %o in French", (error, text) => {
