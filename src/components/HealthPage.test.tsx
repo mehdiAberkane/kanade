@@ -236,7 +236,10 @@ describe("the Santé page", () => {
     const covers = await line(app, "Albums sans pochette");
     expect(covers.textContent).toContain("…");
     expect(covers).toHaveProperty("disabled", true);
-    expect(calls).toContainEqual({ cmd: "tracks_without_folder_cover", args: { ids: [1] } });
+    // Asked by an effect, a moment after the line shows.
+    await app.waitFor(() => {
+      expect(calls).toContainEqual({ cmd: "tracks_without_folder_cover", args: { ids: [1] } });
+    });
     app.act(() => {
       answer([1]);
     });

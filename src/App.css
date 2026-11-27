@@ -1902,3 +1902,195 @@ fieldset.settings-section legend + * {
   display: flex;
   gap: 0.5rem;
 }
+
+/* --- Statistics of the library (KAN-36) -------------------------------- */
+
+.page.stats {
+  max-width: 1100px;
+}
+
+.stats-scope select {
+  margin-left: 0.25rem;
+}
+
+.summary-card {
+  display: block;
+  width: 100%;
+  max-width: 800px;
+  height: auto;
+}
+
+.summary-bg {
+  fill: var(--panel);
+  stroke: var(--border);
+}
+
+.summary-title {
+  fill: var(--text);
+  font-family: var(--font);
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.summary-duration {
+  fill: var(--accent);
+  font-family: var(--font);
+  font-size: 30px;
+  font-weight: 700;
+}
+
+.summary-figure {
+  fill: var(--text);
+  font-family: var(--font);
+  font-size: 26px;
+  font-weight: 600;
+}
+
+.summary-muted,
+.summary-label {
+  fill: var(--muted);
+  font-family: var(--font);
+  font-size: 14px;
+}
+
+.summary-label {
+  fill: var(--text);
+}
+
+.summary-track {
+  fill: var(--border);
+}
+
+.summary-fill {
+  fill: var(--accent);
+}
+
+.stats-export {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.75rem 0 1.25rem;
+}
+
+/* In columns, each section its own height; the charts across them all. */
+.stats-grid {
+  columns: 320px;
+  column-gap: 1rem;
+}
+
+.stats-section {
+  break-inside: avoid;
+  margin: 0 0 1rem;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  background: var(--panel);
+}
+
+.stats-section.wide {
+  column-span: all;
+}
+
+.stats-section h2 {
+  margin: 0 0 0.6rem;
+  font-size: 1.15rem;
+}
+
+.stats-section h3 {
+  margin: 1rem 0 0.4rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.bar-list {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The name and the figures on a line, the bar under them. */
+.bar-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "name value"
+    "track track";
+  align-items: baseline;
+  gap: 0.15rem 0.75rem;
+  font-size: 0.9rem;
+}
+
+.bar-name {
+  grid-area: name;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.bar-track {
+  grid-area: track;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.bar-value {
+  grid-area: value;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.link-btn {
+  border: none;
+  padding: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+}
+
+.columns {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-bottom: 0.75rem;
+}
+
+.columns .column {
+  fill: var(--accent);
+}
+
+.columns .axis {
+  stroke: var(--border);
+}
+
+.columns .column-label {
+  fill: var(--muted);
+  font-size: 11px;
+  text-anchor: middle;
+}
+
+.stats-path {
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}

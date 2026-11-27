@@ -14,6 +14,7 @@ import { sortTracks, type Context } from "../lib/tracks";
 import { useAddLibrary, useLibraries, useWatchNews } from "../lib/useLibraries";
 import { useTracks, useTrackView } from "../lib/useTracks";
 import { AlbumsView } from "./AlbumsView";
+import type { TracksStart } from "./StatsPage";
 import { ArtistsView } from "./ArtistsView";
 import { SearchBar } from "./SearchBar";
 import { TrackTable } from "./TrackTable";
@@ -34,21 +35,28 @@ const TAB_LABELS: Record<Tab, string> = {
  * right, the tracks, the albums or the artists of the one chosen. The
  * libraries are managed on their own page.
  */
-export function TracksPage({ onManage }: { onManage: () => void }) {
+export function TracksPage({
+  onManage,
+  start,
+}: {
+  onManage: () => void;
+  /** Opened from a figure of the statistics: its library and filters (KAN-36). */
+  start?: TracksStart;
+}) {
   const [tab, setTab] = useState<Tab>("tracks");
   const { libraries } = useLibraries();
   const { tracks, error, mark, markError } = useTracks();
   const news = useWatchNews();
   const { view, update } = useTrackView();
   const { add, adding, refusal } = useAddLibrary();
-  const [chosen, setChosen] = useState<number | null>(null);
+  const [chosen, setChosen] = useState<number | null>(start?.libraryId ?? null);
   const [ignoreArticles, setIgnoreArticles] = useState(true);
   const [groupFeaturing, setGroupFeaturing] = useState(true);
   /** The track-only artists listed too: kept while the page lives. */
   const [allArtists, setAllArtists] = useState(false);
   /** The search and the filters, the same for the three tabs. */
   const [query, setQuery] = useState("");
-  const [filters, setFilters] = useState<Filters>(NO_FILTERS);
+  const [filters, setFilters] = useState<Filters>(start?.filters ?? NO_FILTERS);
 
   useEffect(() => {
     invoke<Settings>("settings_get").then(

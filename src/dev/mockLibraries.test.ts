@@ -325,6 +325,14 @@ describe("fake tracks", () => {
   });
 });
 
+describe("the fake statistics", () => {
+  it("saves the summary, as text or as a picture (KAN-36)", async () => {
+    setup();
+    expect(await invoke("stats_save_text", { text: "Kanade" })).toBe(true);
+    expect(await invoke("stats_save_image", new Uint8Array([0x89]))).toBe(true);
+  });
+});
+
 describe("installMockBackend", () => {
   it("brings files every few seconds with ?watch=live", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });

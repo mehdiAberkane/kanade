@@ -81,6 +81,7 @@ export type LibraryError =
   | { code: "not_an_image" }
   | { code: "not_marks_file" }
   | { code: "not_in_library"; name: string }
+  | { code: "not_a_summary" }
   | { code: "io"; message: string }
   | { code: "database"; message: string };
 
@@ -194,6 +195,8 @@ export function errorText(error: unknown): string {
         "Ce fichier ne contient pas de favoris ni de notes : choisis un fichier exporté par " +
         "Kanade, ou une sauvegarde d'Ongaku."
       );
+    case "not_a_summary":
+      return "Ce résumé ne peut pas être enregistré.";
     case "not_in_library":
       return `Ce dossier n'est pas dans la bibliothèque « ${error.name} » : choisis un de ses sous-dossiers.`;
     case "io":

@@ -220,6 +220,20 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   `docs/sante.md`, à garder pareilles qu'Ongaku (ONG-59). Les signalements ignorés vont
   dans `settings` (`health_ignored`). Mesuré sur 50 000 morceaux : albums en 95 ms, puis
   contrôles en 100 ms, lancés juste après l'affichage de la page.
+- Statistiques (KAN-36, page « Statistiques », `src/lib/stats.ts`) :
+  - calculées dans l'interface, comme la Santé, sur les lignes de la liste : mêmes
+    albums et artistes que les onglets. Les fichiers introuvables ne sont pas comptés ;
+  - mesuré sur 50 000 morceaux : 160 à 200 ms (dont 77 ms pour les albums), lancé
+    juste après l'affichage de la page ;
+  - graphiques faits maison (`components/Charts.tsx`) : barres en HTML, colonnes en
+    SVG, couleurs du thème ;
+  - un chiffre qu'un filtre sait dire ouvre la liste filtrée (`TracksStart`, passé par
+    `App`) ;
+  - export : texte (copier, ou `stats_save_text`) et image. L'image est la carte SVG
+    du résumé, ses styles recopiés sur chaque élément (`summaryImage.ts`), dessinée
+    sur un canvas, puis envoyée en PNG à `stats_save_image`. Rust n'accepte qu'un
+    texte de taille raisonnable ou un vrai PNG (`summary.rs`) ;
+  - les statistiques d'écoute iront dans KAN-50, avec les écoutes de KAN-48.
 - Favoris et notes (KAN-32, `library/marks.rs`, `src/lib/marks.ts`) :
   - un cœur et une note de 0 à 5 étoiles, dans les colonnes `favorite` et `rating` de
     `tracks` : ils suivent le morceau renommé ou déplacé ;

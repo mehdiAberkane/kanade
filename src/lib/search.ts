@@ -100,7 +100,7 @@ export function isLossless(track: Track): boolean {
   return LOSSLESS.has(track.format);
 }
 
-function isLossy(track: Track): boolean {
+export function isLossy(track: Track): boolean {
   return LOSSY.has(track.format) && !isLossless(track);
 }
 
