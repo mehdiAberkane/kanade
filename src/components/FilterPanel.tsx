@@ -1,5 +1,5 @@
 import { formatNumber } from "../lib/libraries";
-import type { Choice, Facets, Filters, MinBitrate, Recent } from "../lib/search";
+import type { Choice, Facets, Filters, MinBitrate, MinRating, Recent } from "../lib/search";
 
 interface Props {
   facets: Facets;
@@ -110,6 +110,30 @@ export function FilterPanel({ facets, filters, onFilters }: Props) {
     };
   return (
     <div className="filter-panel-groups">
+      <fieldset className="filter-group">
+        <legend>Favoris</legend>
+        <ul>
+          <li>
+            <label>
+              <input
+                type="checkbox"
+                checked={filters.favorite}
+                onChange={(event) => {
+                  set("favorite")(event.target.checked);
+                }}
+              />{" "}
+              Seulement les favoris <span className="count">{formatNumber(facets.favorite)}</span>
+            </label>
+          </li>
+        </ul>
+      </fieldset>
+      <Radios<MinRating>
+        legend="Note"
+        name="filter-rating"
+        choices={facets.minRating}
+        chosen={filters.minRating}
+        onChosen={set("minRating")}
+      />
       <Boxes
         legend="Genre"
         choices={facets.genres}

@@ -53,6 +53,8 @@ function track(fields: Partial<Track> = {}): Track {
     modifiedMs: 0,
     hasCover: false,
     untitled: false,
+    favorite: false,
+    rating: 0,
     ...fields,
   };
 }
@@ -85,6 +87,8 @@ describe("rows", () => {
       10,
       true,
       false,
+      false,
+      0,
     ];
     expect(fromRow(row)).toEqual({
       id: 7,
@@ -108,6 +112,8 @@ describe("rows", () => {
       modifiedMs: 10,
       hasCover: true,
       untitled: false,
+      favorite: false,
+      rating: 0,
     });
     expect(fromRow([...row.slice(0, 2), 1, ...row.slice(3)] as TrackRow).status).toBe("unreadable");
     expect(fromRow([...row.slice(0, 2), 9, ...row.slice(3)] as TrackRow).status).toBe("present");
@@ -148,6 +154,16 @@ describe("formats", () => {
     expect(columnById("bitrate")?.text(track({ bitrateKbps: null }), context)).toBe("");
     expect(columnById("library")?.text(track({ libraryId: 9 }), context)).toBe("");
     expect(columnById("nope")).toBeUndefined();
+    expect(text("favorite")).toBe("");
+    expect(text("rating")).toBe("");
+    const loved = track({ favorite: true, rating: 3 });
+    expect(columnById("favorite")?.text(loved, context)).toBe("♥");
+    expect(columnById("rating")?.text(loved, context)).toBe("★★★");
+    expect(columnById("rating")?.value(t, context)).toBeNull();
+    // Sorted by them, the unmarked tracks go last.
+    expect(columnById("favorite")?.value(loved, context)).toBe(1);
+    expect(columnById("favorite")?.value(t, context)).toBeNull();
+    expect(columnById("rating")?.value(loved, context)).toBe(3);
     // Every column has a value and a text for any track.
     const full = track({
       albumArtist: "B",
@@ -164,10 +180,12 @@ describe("formats", () => {
     expect(columnById("path")?.text(full, context)).toBe(full.path);
     expect(columnById("modified")?.text(full, context)).toMatch(/^0\d\/01\/2026$/);
     expect(COLUMNS.filter((c) => c.numeric).map((c) => c.id)).toEqual([
+      "favorite",
       "track",
       "disc",
       "duration",
       "year",
+      "rating",
       "bitrate",
       "size",
       "added",
@@ -290,12 +308,14 @@ describe("columns", () => {
     const view = defaultView();
     expect(view.columns.filter((c) => c.visible).map((c) => c.id)).toEqual([
       "title",
+      "favorite",
       "artist",
       "album",
       "track",
       "duration",
       "year",
       "genre",
+      "rating",
       "format",
     ]);
     expect(completeView(null)).toEqual(view);
@@ -310,12 +330,18 @@ describe("columns", () => {
       ],
       sort: { column: "gone", descending: false },
     });
-    expect(view.columns.slice(0, 2)).toEqual([
-      { id: "path", width: 500, visible: true },
-      { id: "title", width: 300, visible: true },
-    ]);
+    const ids = view.columns.map((c) => c.id);
+    expect(view.columns[0]).toEqual({ id: "path", width: 500, visible: true });
+    expect(view.columns[ids.indexOf("title")]).toEqual({ id: "title", width: 300, visible: true });
     expect(view.columns).toHaveLength(COLUMNS.length);
-    expect(view.columns.find((c) => c.id === "artist")?.visible).toBe(false);
+    // A column the kept layout lacks is new: shown if it is by default.
+    expect(view.columns.find((c) => c.id === "artist")?.visible).toBe(true);
+    expect(view.columns.find((c) => c.id === "rating")?.visible).toBe(true);
+    expect(view.columns.find((c) => c.id === "bitrate")?.visible).toBe(false);
+    // Put back where it goes: the heart just after the title, the
+    // library just after the path.
+    expect(ids.indexOf("favorite")).toBe(ids.indexOf("title") + 1);
+    expect(ids[1]).toBe("library");
     expect(view.sort).toBeNull();
     expect(completeView({ columns: [], sort: { column: "year", descending: true } }).sort).toEqual({
       column: "year",

@@ -1,11 +1,13 @@
 // The tracks as the Rust side lists them (tracks_list), read again when the
-// libraries change and, while a scan runs, every few seconds at most; and
-// the list's columns, kept on the Rust side.
+// libraries change and, while a scan runs, every few seconds at most; the
+// favourites and ratings changed on them at once (KAN-32); and the list's
+// columns, kept on the Rust side.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { completeAlbumView, defaultAlbumView, type AlbumView } from "./albums";
 import { errorText, LIBRARY_EVENTS } from "./libraries";
+import { markArgs, type Marker } from "./marks";
 import {
   completeView,
   defaultView,
@@ -62,7 +64,40 @@ export function useTracks() {
     };
   }, [refresh]);
 
-  return { tracks, error };
+  /** Why the last favourite or rating was not kept, if it was not. */
+  const [markError, setMarkError] = useState<string | null>(null);
+
+  // Shown at once; the list read again if the Rust side refuses.
+  const mark = useCallback<Marker>(
+    (ids, change) => {
+      const chosen = new Set(ids);
+      setTracks(
+        (current) =>
+          current &&
+          current.map((t) =>
+            chosen.has(t.id)
+              ? {
+                  ...t,
+                  favorite: change.favorite ?? t.favorite,
+                  rating: change.rating ?? t.rating,
+                }
+              : t,
+          ),
+      );
+      invoke("tracks_mark", markArgs(ids, change)).then(
+        () => {
+          setMarkError(null);
+        },
+        (e: unknown) => {
+          setMarkError(errorText(e));
+          void refresh();
+        },
+      );
+    },
+    [refresh],
+  );
+
+  return { tracks, error, mark, markError };
 }
 
 /**

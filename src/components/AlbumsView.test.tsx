@@ -57,6 +57,8 @@ function row(fields: {
     1_700_000_000_000,
     fields.cover ?? false,
     false,
+    false,
+    0,
   ];
 }
 

@@ -748,6 +748,88 @@ main {
   max-width: 20rem;
 }
 
+/* --- Favourites and ratings (KAN-32) ------------------------------------ */
+
+:root {
+  /* An empty heart or star, on the row under the mouse, selected or focused. */
+  --mark-faint: 0.45;
+}
+
+:root[data-contrast="high"] {
+  --mark-faint: 0.8;
+}
+
+.track-row .mark-cell {
+  justify-content: center;
+  padding: 0 0.25rem;
+}
+
+.stars {
+  display: flex;
+}
+
+.mark,
+.menu-stars [role="menuitemradio"] {
+  border: none;
+  padding: 0 1px;
+  background: none;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* Empty ones hidden elsewhere, so that a long list stays quiet. */
+.mark {
+  opacity: var(--mark-shown, 0);
+}
+
+.track-body .track-row:hover,
+.track-body .track-row.selected,
+.track-scroll:focus .track-row.focused {
+  --mark-shown: var(--mark-faint);
+}
+
+.mark.on,
+.stars:hover .mark,
+.menu-stars [role="menuitemradio"].on,
+.menu-stars:hover [role="menuitemradio"] {
+  color: var(--accent);
+  opacity: 1;
+}
+
+/* Hovered, the stars light up to the one under the mouse. */
+.stars .mark:hover ~ .mark {
+  color: var(--muted);
+  opacity: var(--mark-shown, 0);
+}
+
+.menu-stars [role="menuitemradio"]:hover ~ [role="menuitemradio"] {
+  color: var(--muted);
+}
+
+.menu-stars {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.3rem 0.75rem;
+}
+
+.menu-stars-label {
+  margin-right: 0.4rem;
+  color: var(--muted);
+}
+
+.menu-stars [role="menuitemradio"] {
+  border-radius: 4px;
+  padding: 0.1rem 0.2rem;
+  font-size: 1.15rem;
+}
+
+.menu-stars [role="menuitemradio"]:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
 /* --- The update window (KAN-38) ----------------------------------------- */
 
 .settings-failure {

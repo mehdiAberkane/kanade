@@ -48,6 +48,8 @@ function row(fields: {
     1_700_000_000_000,
     false,
     false,
+    false,
+    0,
   ];
 }
 

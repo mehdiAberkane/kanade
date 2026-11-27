@@ -11,7 +11,7 @@ import {
   type LibrariesScenario,
   type MockLibraries,
 } from "../dev/mockLibraries";
-import type { TrackRow, TrackView } from "../lib/tracks";
+import { COLUMNS, type TrackRow, type TrackView } from "../lib/tracks";
 
 let libraries: MockLibraries | undefined;
 
@@ -53,6 +53,8 @@ function row(fields: {
     1_700_000_000_000,
     false,
     false,
+    false,
+    0,
   ];
 }
 
@@ -368,10 +370,13 @@ describe("Sort and columns", () => {
   });
 
   it("starts from the columns and sort kept, the defaults if none can be read", async () => {
+    // Kept by a version before the favourite and the rating (KAN-32).
+    const older = COLUMNS.filter((c) => !["path", "title", "favorite", "rating"].includes(c.id));
     const kept: TrackView = {
       columns: [
         { id: "path", width: 400, visible: true },
         { id: "title", width: 200, visible: true },
+        ...older.map((c) => ({ id: c.id, width: c.width, visible: false })),
       ],
       sort: { column: "year", descending: true },
     };
@@ -379,14 +384,14 @@ describe("Sort and columns", () => {
     const app = await renderApp();
     await grid(app);
     const headers = app.screen.getAllByRole("columnheader").map((h) => h.textContent);
-    expect(headers).toEqual(["Chemin", "Titre"]);
+    expect(headers).toEqual(["Chemin", "Titre", "Favori", "Note"]);
     expect(titles(app)[0]).toBe("D:\\Musique\\Cloud song.flac");
     app.cleanup();
 
     backend({ overrides: { track_view_get: refuse("unreadable") } });
     const again = await renderApp();
     await grid(again);
-    expect(again.screen.getAllByRole("columnheader")).toHaveLength(8);
+    expect(again.screen.getAllByRole("columnheader")).toHaveLength(10);
   });
 
   it("shows, hides and orders the columns", async () => {
@@ -399,6 +404,7 @@ describe("Sort and columns", () => {
     await app.user.click(panel.getByRole("checkbox", { name: "Genre" }));
     await app.user.click(panel.getByRole("checkbox", { name: "Taille" }));
     await app.user.click(panel.getByRole("button", { name: "Monter Artiste" }));
+    await app.user.click(panel.getByRole("button", { name: "Monter Artiste" }));
     await app.user.click(
       panel.getByRole("button", { name: "Descendre Bibliothèque" })
         .previousElementSibling as HTMLElement,
@@ -407,10 +413,12 @@ describe("Sort and columns", () => {
     expect(names()).toEqual([
       "Artiste",
       "Titre",
+      "Favori",
       "Album",
       "N°",
       "Durée",
       "Année",
+      "Note",
       "Format",
       "Taille",
     ]);
@@ -568,6 +576,137 @@ describe("Selection", () => {
   });
 });
 
+describe("Favourites and ratings", () => {
+  const rowOf = (app: App, title: string) =>
+    app.screen.getByRole("row", { name: new RegExp(title) });
+  const marked = (calls: { cmd: string; args: InvokeArgs | undefined }[]) =>
+    calls.filter((c) => c.cmd === "tracks_mark").map((c) => c.args);
+
+  it("marks a track with its heart and its stars, the selection as it is", async () => {
+    const { calls } = backend();
+    const app = await renderApp();
+    await grid(app);
+    const row = () => app.within(rowOf(app, "Andy"));
+    const heart = () => row().getByRole("button", { name: "Favori" });
+    expect(heart().getAttribute("aria-pressed")).toBe("false");
+    await app.user.click(heart());
+    expect(heart().getAttribute("aria-pressed")).toBe("true");
+    expect(app.screen.queryAllByRole("row", { selected: true })).toHaveLength(0);
+    await app.user.click(heart());
+    expect(heart().getAttribute("aria-pressed")).toBe("false");
+
+    const star = (n: string) => row().getByRole("button", { name: n });
+    await app.user.click(star("3 étoiles"));
+    expect(star("3 étoiles").getAttribute("aria-pressed")).toBe("true");
+    expect(star("4 étoiles").getAttribute("aria-pressed")).toBe("false");
+    // The same star again: no rating.
+    await app.user.click(star("3 étoiles"));
+    expect(star("1 étoile").getAttribute("aria-pressed")).toBe("false");
+    const andy = Number(rowOf(app, "Andy").id.replace("track-", ""));
+    expect(marked(calls)).toEqual([
+      { ids: [andy], favorite: true, rating: null },
+      { ids: [andy], favorite: false, rating: null },
+      { ids: [andy], favorite: null, rating: 3 },
+      { ids: [andy], favorite: null, rating: 0 },
+    ]);
+  });
+
+  it("rates the selection with 0 to 5, else the track with the focus", async () => {
+    const { calls } = backend();
+    const app = await renderApp();
+    const table = await grid(app);
+    table.focus();
+    // Nothing selected, no focus: nothing rated.
+    await app.user.keyboard("4");
+    expect(marked(calls)).toEqual([]);
+
+    await app.user.click(rowOf(app, "Andy"));
+    await app.user.keyboard("{Shift>}{ArrowDown}{/Shift}4");
+    const [first, second] = app.screen.getAllByRole("row", { selected: true }).map((r) => r.id);
+    const stars = (id: string) =>
+      (document.getElementById(id) as HTMLElement).querySelectorAll("[aria-pressed=true]").length;
+    expect([stars(first), stars(second)]).toEqual([4, 4]);
+    expect(marked(calls)).toHaveLength(1);
+
+    // The focus alone, once unselected.
+    await app.user.keyboard("{ArrowUp}{Control>} {/Control}0");
+    expect(app.screen.queryAllByRole("row", { selected: true })).toHaveLength(0);
+    expect([stars(first), stars(second)]).toEqual([0, 4]);
+    // A digit with Ctrl is not a rating.
+    await app.user.keyboard("{Control>}5{/Control}");
+    expect(marked(calls)).toHaveLength(2);
+  });
+
+  it("marks the tracks of the menu, and its stars take a rating away", async () => {
+    const { calls } = backend();
+    const app = await renderApp();
+    await grid(app);
+    const menuOn = async (title: string) => {
+      await app.user.pointer({ keys: "[MouseRight]", target: rowOf(app, title) });
+      return app.within(app.screen.getByRole("menu"));
+    };
+    let menu = await menuOn("Andy");
+    await app.user.click(menu.getByRole("menuitem", { name: "Ajouter aux favoris" }));
+    menu = await menuOn("Andy");
+    await app.user.click(menu.getByRole("menuitem", { name: "Retirer des favoris" }));
+    menu = await menuOn("Andy");
+    await app.user.click(menu.getByRole("menuitemradio", { name: "4 étoiles" }));
+    menu = await menuOn("Andy");
+    expect(
+      menu.getByRole("menuitemradio", { name: "4 étoiles" }).getAttribute("aria-checked"),
+    ).toBe("true");
+    await app.user.click(menu.getByRole("menuitemradio", { name: "4 étoiles" }));
+
+    await app.user.keyboard("{Shift>}");
+    await app.user.click(rowOf(app, "Yesterday"));
+    await app.user.keyboard("{/Shift}");
+    menu = await menuOn("Yesterday");
+    await app.user.click(
+      menu.getByRole("menuitem", { name: "Ajouter les 3 morceaux aux favoris" }),
+    );
+    menu = await menuOn("Yesterday");
+    expect(menu.getByRole("menuitem", { name: "Retirer les 3 morceaux des favoris" })).toBeTruthy();
+    // Different ratings: none checked, a star gives them all its rating.
+    await app.user.click(rowOf(app, "Andy"));
+    await app.user.keyboard("2");
+    await app.user.keyboard("{Shift>}");
+    await app.user.click(rowOf(app, "Yesterday"));
+    await app.user.keyboard("{/Shift}");
+    menu = await menuOn("Yesterday");
+    expect(menu.queryAllByRole("menuitemradio", { checked: true })).toHaveLength(0);
+    await app.user.click(menu.getByRole("menuitemradio", { name: "5 étoiles" }));
+    const all = marked(calls);
+    const last = all[all.length - 1] as { ids: number[]; rating: number };
+    expect(last.ids).toHaveLength(3);
+    expect(last.rating).toBe(5);
+  });
+
+  it("says when a mark was not kept, and shows the list as it is", async () => {
+    let refused = true;
+    backend({
+      overrides: {
+        tracks_mark: () =>
+          refused ? refuse({ code: "database", message: "locked" })() : Promise.resolve(1),
+      },
+    });
+    const app = await renderApp();
+    await grid(app);
+    const heart = () => app.within(rowOf(app, "Andy")).getByRole("button", { name: "Favori" });
+    await app.user.click(heart());
+    expect((await app.screen.findByRole("alert")).textContent).toBe(
+      "Favori ou note non enregistré : Erreur de la base de Kanade : locked",
+    );
+    await app.waitFor(() => {
+      expect(heart().getAttribute("aria-pressed")).toBe("false");
+    });
+    refused = false;
+    await app.user.click(heart());
+    await app.waitFor(() => {
+      expect(app.screen.queryByRole("alert")).toBeNull();
+    });
+  });
+});
+
 describe("Track menu", () => {
   it("copies the paths and shows a track in the Explorer", async () => {
     const { calls } = backend({ overrides: { track_reveal: () => null } });
@@ -576,7 +715,7 @@ describe("Track menu", () => {
     const rowOf = (title: string) => app.screen.getByRole("row", { name: new RegExp(title) });
     await app.user.pointer({ keys: "[MouseRight]", target: rowOf("Andy") });
     const menu = app.within(app.screen.getByRole("menu"));
-    expect(document.activeElement?.textContent).toBe("Afficher dans l'Explorateur");
+    expect(document.activeElement?.textContent).toBe("Ajouter aux favoris");
     await app.user.click(menu.getByRole("menuitem", { name: "Copier le chemin" }));
     expect(await navigator.clipboard.readText()).toBe("D:\\Musique\\Andy.flac");
     expect(app.screen.queryByRole("menu")).toBeNull();
@@ -602,12 +741,17 @@ describe("Track menu", () => {
     await app.user.keyboard("{Shift>}{F10}{/Shift}");
     expect(app.screen.getByRole("menu")).toBeTruthy();
     expect(app.screen.getAllByRole("row", { selected: true })).toHaveLength(1);
-    await app.user.keyboard("{ArrowDown}");
-    expect(document.activeElement?.textContent).toBe("Copier le chemin");
-    await app.user.keyboard("{ArrowDown}");
-    expect(document.activeElement?.textContent).toBe("Afficher dans l'Explorateur");
     await app.user.keyboard("{ArrowUp}");
     expect(document.activeElement?.textContent).toBe("Copier le chemin");
+    await app.user.keyboard("{ArrowUp}");
+    expect(document.activeElement?.textContent).toBe("Afficher dans l'Explorateur");
+    await app.user.keyboard("{ArrowDown}");
+    expect(document.activeElement?.textContent).toBe("Copier le chemin");
+    // Down from the first entry, then right, along the stars.
+    await app.user.keyboard("{ArrowDown}{ArrowDown}{ArrowRight}");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("2 étoiles");
+    await app.user.keyboard("{ArrowLeft}");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("1 étoile");
     await app.user.keyboard("{Escape}");
     expect(app.screen.queryByRole("menu")).toBeNull();
     expect(document.activeElement).toBe(table);

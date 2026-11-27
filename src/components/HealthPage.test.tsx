@@ -49,6 +49,8 @@ function row(
     1,
     fields.cover ?? true,
     fields.untitled ?? false,
+    false,
+    0,
   ];
 }
 

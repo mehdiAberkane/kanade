@@ -34,6 +34,8 @@ function track(id: number, title: string): Track {
     modifiedMs: 0,
     hasCover: false,
     untitled: false,
+    favorite: false,
+    rating: 0,
   };
 }
 
@@ -80,7 +82,7 @@ describe("TrackTable", () => {
     const view: TrackView = {
       columns: [
         { id: "title", width: 200, visible: true },
-        { id: "rating", width: 80, visible: true },
+        { id: "mood", width: 80, visible: true },
       ],
       sort: null,
     };
@@ -104,7 +106,7 @@ describe("ColumnsMenu", () => {
     const view: TrackView = {
       columns: [
         { id: "title", width: 200, visible: true },
-        { id: "rating", width: 80, visible: false },
+        { id: "mood", width: 80, visible: false },
       ],
       sort: null,
     };
@@ -117,8 +119,8 @@ describe("ColumnsMenu", () => {
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: "Colonnes" }));
-    expect(screen.getByRole("checkbox", { name: "rating" })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "mood" })).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Descendre Titre" }));
-    expect(changes[0].columns.map((c) => c.id)).toEqual(["rating", "title"]);
+    expect(changes[0].columns.map((c) => c.id)).toEqual(["mood", "title"]);
   });
 });

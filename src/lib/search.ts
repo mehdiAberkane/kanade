@@ -2,6 +2,7 @@
 // track's text is normalized once, and each search goes through them all
 // (see the measure in search.test.ts). No SQL, so nothing typed can reach
 // a query: a « " » or a « % » is a character like any other.
+import { ratingText } from "./marks";
 import { searchable, type Track } from "./tracks";
 
 // --- Search ---------------------------------------------------------------
@@ -120,6 +121,10 @@ export type Recent = 7 | 30 | 90;
 const MIN_BITRATES = [128, 192, 256, 320] as const;
 export type MinBitrate = (typeof MIN_BITRATES)[number];
 
+const MIN_RATINGS = [1, 2, 3, 4, 5] as const;
+export type MinRating = (typeof MIN_RATINGS)[number];
+const minRatingText = (n: MinRating) => (n === 5 ? "5 étoiles" : `${ratingText(n)} ou plus`);
+
 /** The filters chosen. Within a group, any choice will do; groups add up. */
 export interface Filters {
   /** By `searchable` genre; "" for no genre. */
@@ -136,6 +141,9 @@ export interface Filters {
   noCover: boolean;
   /** No artist, album, year or track number in the tags. */
   incomplete: boolean;
+  /** The user's favourites only (KAN-32). */
+  favorite: boolean;
+  minRating: MinRating | null;
 }
 
 export const NO_FILTERS: Filters = {
@@ -148,6 +156,8 @@ export const NO_FILTERS: Filters = {
   recent: null,
   noCover: false,
   incomplete: false,
+  favorite: false,
+  minRating: null,
 };
 
 export type FilterGroup = keyof Filters;
@@ -203,6 +213,10 @@ function passes(track: Track, group: FilterGroup, filters: Filters, now: number)
         track.year === null ||
         track.track === null
       );
+    case "favorite":
+      return !filters.favorite || track.favorite;
+    case "minRating":
+      return filters.minRating === null || track.rating >= filters.minRating;
   }
 }
 
@@ -254,6 +268,8 @@ export interface Facets {
   recent: Choice<Recent>[];
   noCover: number;
   incomplete: number;
+  favorite: number;
+  minRating: Choice<MinRating>[];
 }
 
 function counted<K>(tracks: Track[], keyOf: (t: Track) => K): Map<K, number> {
@@ -346,6 +362,12 @@ export function facets(tracks: Track[], query: string, filters: Filters, now: nu
       "incomplete",
       (t) => !t.artist || !t.album || t.year === null || t.track === null,
     ),
+    favorite: count("favorite", (t) => t.favorite),
+    minRating: MIN_RATINGS.map((value) => ({
+      value,
+      label: minRatingText(value),
+      count: count("minRating", (t) => t.rating >= value),
+    })),
   };
 }
 
@@ -432,6 +454,10 @@ export function chips(filters: Filters, genreLabels: Map<string, string>): Chip[
   if (filters.noCover) list.push({ label: "Sans pochette", without: drop("noCover", false) });
   if (filters.incomplete) {
     list.push({ label: "Tags incomplets", without: drop("incomplete", false) });
+  }
+  if (filters.favorite) list.push({ label: "Favoris", without: drop("favorite", false) });
+  if (filters.minRating !== null) {
+    list.push({ label: minRatingText(filters.minRating), without: drop("minRating", null) });
   }
   return list;
 }

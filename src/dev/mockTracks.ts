@@ -157,6 +157,9 @@ export function mockTracks(
         now - (30 + pick(3000)) * 86_400_000,
         covered && !untagged && status === 0,
         untagged || status === 1,
+        // Now and then a favourite, a rating (KAN-32).
+        id % 37 === 0,
+        id % 9 === 0 ? 1 + (id % 5) : 0,
       ]);
     }
   }

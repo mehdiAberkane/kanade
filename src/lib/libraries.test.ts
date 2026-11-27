@@ -80,7 +80,12 @@ describe("errorText", () => {
       { code: "not_an_image" },
       "Cette image ne peut pas servir de fond : choisis une photo JPEG, PNG ou WebP.",
     ],
-    [{ code: "io", message: "denied" }, "Impossible d'écrire le fichier : denied"],
+    [
+      { code: "not_marks_file" },
+      "Ce fichier ne contient pas de favoris ni de notes : choisis un fichier exporté par " +
+        "Kanade, ou une sauvegarde d'Ongaku.",
+    ],
+    [{ code: "io", message: "denied" }, "Erreur de fichier : denied"],
     [{ code: "database", message: "locked" }, "Erreur de la base de Kanade : locked"],
   ])("tells %o in French", (error, text) => {
     expect(errorText(error)).toBe(text);

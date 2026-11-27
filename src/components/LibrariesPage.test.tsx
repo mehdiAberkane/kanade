@@ -347,7 +347,7 @@ describe("Scan errors", () => {
     );
     await app.user.click(musique.getByRole("button", { name: "Exporter en texte…" }));
     expect((await musique.findByRole("status")).textContent).toBe(
-      "Impossible d'écrire le fichier : Accès refusé. (os error 5)",
+      "Erreur de fichier : Accès refusé. (os error 5)",
     );
   });
 });

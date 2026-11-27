@@ -44,6 +44,8 @@ function track(fields: Partial<Track> = {}): Track {
     modifiedMs: 0,
     hasCover: true,
     untitled: false,
+    favorite: false,
+    rating: 0,
     ...fields,
   };
 }
@@ -133,6 +135,8 @@ describe("matcher, the filters", () => {
     track({ title: "nocover", hasCover: false }),
     track({ title: "notrack", track: null }),
     track({ title: "other", format: "Other", bitrateKbps: null }),
+    track({ title: "loved", favorite: true, rating: 2 }),
+    track({ title: "best", rating: 5 }),
   ];
   const only = (filters: Partial<Filters>) => found(tracks, "", { ...NO_FILTERS, ...filters });
 
@@ -169,6 +173,13 @@ describe("matcher, the filters", () => {
     expect(only({ incomplete: true })).toEqual(["nogenre", "notrack"]);
   });
 
+  it("filters by favourite and by rating (KAN-32)", () => {
+    expect(only({ favorite: true })).toEqual(["loved"]);
+    expect(only({ minRating: 2 })).toEqual(["loved", "best"]);
+    expect(only({ minRating: 5 })).toEqual(["best"]);
+    expect(only({ favorite: true, minRating: 3 })).toEqual([]);
+  });
+
   it("counts the choices made", () => {
     expect(filterCount(NO_FILTERS)).toBe(0);
     const some: Filters = {
@@ -189,7 +200,7 @@ describe("facets", () => {
     track({ genre: "Jazz", year: 1965 }),
     track({ genre: "jazz", year: 1968, hasCover: false }),
     track({ genre: "Rock", year: 1975, format: "MP3", bitrateKbps: 192, addedMs: NOW }),
-    track({ genre: null, year: null, artist: null }),
+    track({ genre: null, year: null, artist: null, favorite: true, rating: 4 }),
   ];
 
   it("counts what each choice would leave, its own group aside", () => {
@@ -214,6 +225,14 @@ describe("facets", () => {
     expect(all.recent.map((r) => r.count)).toEqual([1, 1, 1]);
     expect(all.noCover).toBe(1);
     expect(all.incomplete).toBe(1);
+    expect(all.favorite).toBe(1);
+    expect(all.minRating.map((r) => [r.label, r.count])).toEqual([
+      ["1 étoile ou plus", 1],
+      ["2 étoiles ou plus", 1],
+      ["3 étoiles ou plus", 1],
+      ["4 étoiles ou plus", 1],
+      ["5 étoiles", 0],
+    ]);
 
     // Jazz ticked: Rock still shows its count, the decades follow Jazz.
     const jazz = facets(tracks, "", { ...NO_FILTERS, genres: ["jazz"] }, NOW);
@@ -236,6 +255,8 @@ describe("chips", () => {
       recent: 30,
       noCover: true,
       incomplete: true,
+      favorite: true,
+      minRating: 3,
     };
     const list = chips(filters, new Map([["jazz", "Jazz"]]));
     expect(list.map((c) => c.label)).toEqual([
@@ -251,11 +272,15 @@ describe("chips", () => {
       "Ajoutés : 30 derniers jours",
       "Sans pochette",
       "Tags incomplets",
+      "Favoris",
+      "3 étoiles ou plus",
     ]);
     expect(list[0].without.genres).toEqual([""]);
     expect(list[7].without.minBitrate).toBeNull();
     expect(list[10].without.noCover).toBe(false);
     expect(list[11].without).toEqual({ ...filters, incomplete: false });
+    expect(list[12].without.favorite).toBe(false);
+    expect(list[13].without.minRating).toBeNull();
     expect(chips({ ...NO_FILTERS, genres: ["blues"] }, new Map())[0].label).toBe("blues");
     expect(chips(NO_FILTERS, new Map())).toEqual([]);
   });

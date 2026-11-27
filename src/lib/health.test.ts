@@ -42,6 +42,8 @@ function track(fields: Partial<Track> = {}): Track {
     modifiedMs: 1,
     hasCover: true,
     untitled: false,
+    favorite: false,
+    rating: 0,
     ...fields,
   };
 }
