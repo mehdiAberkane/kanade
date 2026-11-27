@@ -12,6 +12,8 @@ import {
   type UpdateScenario,
 } from "./dev/mockBackend";
 import { createMockLibraries, type MockLibraries } from "./dev/mockLibraries";
+import { NOTICE_MS } from "./components/UpdateNotice";
+import { CHECK_EVERY_MS } from "./lib/useUpdater";
 
 const VERSION = "1.2.3";
 
@@ -72,6 +74,8 @@ afterEach(async () => {
   cleanup();
   libraries?.dispose();
   vi.useRealTimers();
+  // The version announced is kept in the window's storage (KAN-51).
+  localStorage.clear();
   // The listeners stop once their promise settles: before the mocks go.
   await new Promise((resolve) => setTimeout(resolve, 0));
   clearMocks();
@@ -142,9 +146,7 @@ describe("Settings › Mises à jour", () => {
       name: `Installer la version ${MOCK_NEXT_VERSION}…`,
     });
     // The top bar offers it too.
-    expect(
-      screen.getByRole("button", { name: `⬆ Mettre à jour vers ${MOCK_NEXT_VERSION}` }),
-    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: `⬆ ${MOCK_NEXT_VERSION} disponible` })).toBeTruthy();
 
     // Nothing installs before the user has seen the notes and said yes.
     await user.click(install);
@@ -461,12 +463,99 @@ describe("Automatic update check", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     backend("available");
     const { screen, act } = await renderApp();
-    expect(screen.queryByRole("button", { name: /Mettre à jour vers/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /disponible$/ })).toBeNull();
     await act(() => vi.advanceTimersByTimeAsync(5_000));
     vi.useRealTimers();
     expect(
-      await screen.findByRole("button", { name: `⬆ Mettre à jour vers ${MOCK_NEXT_VERSION}` }),
+      await screen.findByRole("button", { name: `⬆ ${MOCK_NEXT_VERSION} disponible` }),
     ).toBeTruthy();
+  });
+
+  it("says a newer version once, at the bottom right, and lets it go by itself", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    backend("available");
+    const first = await renderApp();
+    await first.act(() => vi.advanceTimersByTimeAsync(5_000));
+    const said = `Kanade ${MOCK_NEXT_VERSION} est disponible.`;
+    expect(first.screen.getByText(said)).toBeTruthy();
+    await first.act(() => vi.advanceTimersByTimeAsync(NOTICE_MS));
+    expect(first.screen.queryByText(said)).toBeNull();
+    // The top bar's button stays.
+    expect(
+      first.screen.getByRole("button", { name: `⬆ ${MOCK_NEXT_VERSION} disponible` }),
+    ).toBeTruthy();
+    first.cleanup();
+
+    // Kanade started again: the same version is not announced twice.
+    const again = await renderApp();
+    await again.act(() => vi.advanceTimersByTimeAsync(5_000));
+    expect(again.screen.queryByText(said)).toBeNull();
+    expect(again.screen.getByRole("button", { name: /disponible$/ })).toBeTruthy();
+  });
+
+  it("opens the notes from the notice, or closes it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    backend("available");
+    const { screen, act, cleanup } = await renderApp();
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
+    vi.useRealTimers();
+    const { default: userEvent } = await import("@testing-library/user-event");
+    await userEvent.click(screen.getByRole("button", { name: "Voir les nouveautés" }));
+    expect(screen.getByRole("button", { name: "Installer et redémarrer" })).toBeTruthy();
+    expect(screen.queryByText(/est disponible\.$/)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Plus tard" }));
+
+    localStorage.clear();
+    cleanup();
+    libraries?.dispose();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    backend("available");
+    const next = await renderApp();
+    await next.act(() => vi.advanceTimersByTimeAsync(5_000));
+    vi.useRealTimers();
+    await userEvent.click(next.screen.getByRole("button", { name: "Fermer" }));
+    expect(next.screen.queryByText(/est disponible\.$/)).toBeNull();
+  });
+
+  it("still says a newer version when the window's storage is refused", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const refused = () => {
+      throw new Error("storage refused");
+    };
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(refused);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(refused);
+    backend("available");
+    const { screen, act } = await renderApp();
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
+    expect(screen.getByText(`Kanade ${MOCK_NEXT_VERSION} est disponible.`)).toBeTruthy();
+    vi.restoreAllMocks();
+  });
+
+  it("checks every hour, and when the window comes back an hour later", async () => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"],
+    });
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+    const { calls } = backend("none");
+    const { act } = await renderApp();
+    const checks = () => calls.filter((c) => c === "plugin:updater|check").length;
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
+    expect(checks()).toBe(1);
+    // Back soon after: no check.
+    await act(() => {
+      window.dispatchEvent(new Event("focus"));
+      return vi.advanceTimersByTimeAsync(0);
+    });
+    expect(checks()).toBe(1);
+    await act(() => vi.advanceTimersByTimeAsync(CHECK_EVERY_MS));
+    expect(checks()).toBe(2);
+    // The PC slept two hours, its timers with it: back, it checks.
+    vi.setSystemTime(Date.now() + 2 * CHECK_EVERY_MS);
+    await act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      return vi.advanceTimersByTimeAsync(0);
+    });
+    expect(checks()).toBe(3);
   });
 
   it("does not check when the settings turn it off", async () => {
@@ -486,11 +575,11 @@ describe("Automatic update check", () => {
     await act(() => vi.advanceTimersByTimeAsync(5_000));
     vi.useRealTimers();
     const { default: userEvent } = await import("@testing-library/user-event");
-    await userEvent.click(await screen.findByRole("button", { name: /Mettre à jour vers/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /disponible$/ }));
     await userEvent.click(screen.getByRole("button", { name: "Installer et redémarrer" }));
     // The button gives way to the progress, in the top bar.
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: /Mettre à jour vers/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: /disponible$/ })).toBeNull();
     });
     expect(screen.getAllByText(/^(Sauvegarde des données|Téléchargement)…/)).not.toHaveLength(0);
     await waitFor(
