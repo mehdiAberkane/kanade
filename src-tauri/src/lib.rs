@@ -8,6 +8,7 @@ mod commands;
 mod e2e;
 pub mod library;
 pub mod store;
+mod summary;
 
 use std::path::{Path, PathBuf};
 
@@ -128,6 +129,8 @@ pub fn run() {
             commands::library_scan,
             commands::library_cancel_scan,
             commands::library_relocate,
+            commands::stats_save_text,
+            commands::stats_save_image,
             commands::library_exclude_folder,
             commands::library_include_folder,
             commands::library_set_excluded_extensions,

@@ -7,17 +7,24 @@ import { DropZone } from "./components/DropZone";
 import { HealthPage } from "./components/HealthPage";
 import { LibrariesPage } from "./components/LibrariesPage";
 import { SettingsPage } from "./components/SettingsPage";
+import { StatsPage, type TracksStart } from "./components/StatsPage";
 import { TracksPage } from "./components/TracksPage";
 import { UpdateDialog } from "./components/UpdateDialog";
 import { statusLine } from "./lib/updater";
 import { useBackgroundUpdateCheck, useUpdater } from "./lib/useUpdater";
 import "./App.css";
 
-type Page = "tracks" | "libraries" | "health" | "appearance" | "settings";
+type Page = "tracks" | "libraries" | "health" | "stats" | "appearance" | "settings";
 
 function App() {
   const [version, setVersion] = useState("");
   const [page, setPage] = useState<Page>("tracks");
+  /** The list opened from a figure of the statistics, with its filters. */
+  const [start, setStart] = useState<TracksStart | undefined>(undefined);
+  const select = (next: Page) => {
+    setStart(undefined);
+    setPage(next);
+  };
   /** The update window: notes, then the go to install. */
   const [confirming, setConfirming] = useState(false);
   const confirm = () => {
@@ -39,19 +46,22 @@ function App() {
         <header className="topbar">
           <span className="brand">Kanade</span>
           <nav className="nav">
-            <NavButton current={page} page="tracks" onSelect={setPage}>
+            <NavButton current={page} page="tracks" onSelect={select}>
               Musique
             </NavButton>
-            <NavButton current={page} page="libraries" onSelect={setPage}>
+            <NavButton current={page} page="libraries" onSelect={select}>
               Bibliothèques
             </NavButton>
-            <NavButton current={page} page="health" onSelect={setPage}>
+            <NavButton current={page} page="health" onSelect={select}>
               Santé
             </NavButton>
-            <NavButton current={page} page="appearance" onSelect={setPage}>
+            <NavButton current={page} page="stats" onSelect={select}>
+              Statistiques
+            </NavButton>
+            <NavButton current={page} page="appearance" onSelect={select}>
               Apparence
             </NavButton>
-            <NavButton current={page} page="settings" onSelect={setPage}>
+            <NavButton current={page} page="settings" onSelect={select}>
               Réglages
             </NavButton>
           </nav>
@@ -62,13 +72,22 @@ function App() {
         <main>
           {page === "tracks" && (
             <TracksPage
+              start={start}
               onManage={() => {
-                setPage("libraries");
+                select("libraries");
               }}
             />
           )}
           {page === "libraries" && <LibrariesPage />}
           {page === "health" && <HealthPage />}
+          {page === "stats" && (
+            <StatsPage
+              onShow={(next) => {
+                setStart(next);
+                setPage("tracks");
+              }}
+            />
+          )}
           {page === "appearance" && <AppearancePage />}
           {page === "settings" && <SettingsPage version={version} onInstall={confirm} />}
         </main>

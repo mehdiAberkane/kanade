@@ -495,6 +495,10 @@ export function createMockLibraries({
         if (folder === null) return refuse({ code: "not_in_library", name: entry.view.name });
         return exclude(entry, { folders: [...entry.view.exclusions.folders, folder] });
       }
+      case "stats_save_text":
+      case "stats_save_image":
+        // The save dialog: saved.
+        return true;
       case "marks_export":
         // The save dialog: saved, with the tracks marked.
         return { tracks: listed().filter((row) => row[21] || row[22] > 0).length };
