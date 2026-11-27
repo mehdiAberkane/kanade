@@ -43,6 +43,19 @@ pub fn reads(format: &str) -> bool {
 pub struct Speakers {
     device: Option<MixerDeviceSink>,
     lost: Arc<AtomicBool>,
+    /// For the tests of the commands: the tracks are queued, never played.
+    silent: bool,
+}
+
+impl Speakers {
+    /// An output where nothing comes out of the PC, and nothing moves on.
+    #[cfg(test)]
+    pub fn silent() -> Self {
+        Self {
+            silent: true,
+            ..Self::default()
+        }
+    }
 }
 
 fn no_output(error: impl std::fmt::Display) -> AudioError {
@@ -55,6 +68,12 @@ impl Output for Speakers {
     type Sink = Speaker;
 
     fn sink(&mut self) -> Result<Speaker, AudioError> {
+        if self.silent {
+            // Seen as lost: a seek does not wait for an output that never plays.
+            let (player, _) = Player::new();
+            let lost = Arc::new(AtomicBool::new(true));
+            return Ok(Speaker { player, lost });
+        }
         if self.lost.swap(false, Ordering::SeqCst) {
             self.device = None;
         }

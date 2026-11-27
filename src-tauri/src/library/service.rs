@@ -17,7 +17,7 @@ use serde::Serialize;
 use super::appearance::Appearance;
 use super::covers::{self, CoverSize};
 use super::exclusions::{self, Exclusions};
-use super::index::{Index, TrackId};
+use super::index::{Index, TrackId, TrackStatus};
 use super::libraries::{Library, LibraryId, Settings, TooBroad};
 use super::listing::{AlbumView, RevealTarget, TrackRow, TrackView};
 use super::marks;
@@ -26,6 +26,7 @@ use super::playback::PlayerChoice;
 use super::scan::{LibraryError, ScanError};
 use super::scanner::{ScanEvents, ScanState, Scanner};
 use super::watcher::{Timing, WatchState, Watcher};
+use crate::audio::{self, Memory, Playable, Skip};
 use crate::store;
 
 /// A library as the interface shows it.
@@ -244,6 +245,51 @@ impl LibraryService {
                     .ok_or(LibraryError::TrackNotFound)?
                     .track
                     .path)
+            })
+            .collect()
+    }
+
+    /// Track `id` as the built-in player needs it (KAN-8); none when it
+    /// left the index.
+    pub fn playable(&self, id: TrackId) -> Result<Option<Playable>, LibraryError> {
+        let Some(found) = self.index().track(id)? else {
+            return Ok(None);
+        };
+        let track = found.track;
+        let skip = if matches!(found.status, TrackStatus::Missing { .. }) {
+            Some(Skip::Gone)
+        } else if audio::reads(&track.format) {
+            None
+        } else {
+            Some(Skip::Format)
+        };
+        Ok(Some(Playable {
+            title: track.display_title(),
+            path: PathBuf::from(track.path),
+            id,
+            artist: track.artist,
+            album: track.album,
+            duration_ms: track.duration_ms,
+            has_cover: track.has_cover,
+            skip,
+        }))
+    }
+
+    /// The tracks of the built-in player's queue, in its order; one gone
+    /// from the index has no title.
+    pub fn queue_entries(&self, ids: &[TrackId]) -> Result<Vec<Playable>, LibraryError> {
+        ids.iter()
+            .map(|id| {
+                Ok(self.playable(*id)?.unwrap_or_else(|| Playable {
+                    path: PathBuf::new(),
+                    id: *id,
+                    title: String::new(),
+                    artist: None,
+                    album: None,
+                    duration_ms: None,
+                    has_cover: false,
+                    skip: Some(Skip::Gone),
+                }))
             })
             .collect()
     }
@@ -570,6 +616,23 @@ impl LibraryService {
     #[cfg(test)]
     pub(crate) fn wait_idle(&self) {
         self.scanner.wait_idle();
+    }
+}
+
+/// The built-in player's library (KAN-8): the tracks of the index, and what
+/// it keeps between two launches in the settings. A database that no
+/// longer reads costs only that.
+impl audio::Library for std::sync::Arc<LibraryService> {
+    fn playable(&self, id: TrackId) -> Option<Playable> {
+        LibraryService::playable(self, id).ok().flatten()
+    }
+
+    fn remember(&self, memory: &Memory) {
+        let _ = self.index().save_player_memory(memory);
+    }
+
+    fn recall(&self) -> Option<Memory> {
+        self.index().player_memory().ok().flatten()
     }
 }
 

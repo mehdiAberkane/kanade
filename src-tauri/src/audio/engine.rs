@@ -67,7 +67,6 @@ pub struct Playable {
     pub has_cover: bool,
     /// Why the player cannot play it, if it cannot: its file is gone, or its
     /// format is one the decoder does not read.
-    #[serde(skip)]
     pub skip: Option<Skip>,
 }
 

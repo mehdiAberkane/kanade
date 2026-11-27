@@ -12,10 +12,12 @@
 #![allow(clippy::needless_pass_by_value)]
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State, WebviewWindow, Window, WindowEvent};
 
+use crate::audio::{Engine, Playable, Playback, PlayerEvents, PlayerState, Repeat, Skip, Speakers};
 use crate::background;
 use crate::library::marks;
 use crate::library::playback::PlayerChoice;
@@ -57,16 +59,38 @@ const SCAN_PROGRESS: &str = "library-scan-progress";
 const LIBRARY_DROPPED: &str = "library-dropped";
 /// What a watch update changed in a library (KAN-27).
 const LIBRARY_UPDATED: &str = "library-updated";
+/// The built-in player's track, queue or settings changed (KAN-8).
+const PLAYER_STATE: &str = "player-state";
+/// Where its track is, a few times a second while it plays.
+const PLAYER_POSITION: &str = "player-position";
 
 /// The libraries, absent when the database did not open (the interface
 /// already says so).
-pub struct Libraries(pub Option<LibraryService>);
+pub struct Libraries(pub Option<Arc<LibraryService>>);
 
 impl Libraries {
     fn get(&self) -> Result<&LibraryService, LibraryError> {
+        self.0.as_deref().ok_or_else(|| LibraryError::Database {
+            message: "the database is not open".to_owned(),
+        })
+    }
+}
+
+/// The built-in player (KAN-8); absent when the database did not open.
+pub struct Audio(pub Option<Playback<Speakers, Arc<LibraryService>>>);
+
+impl Audio {
+    fn get(&self) -> Result<&Playback<Speakers, Arc<LibraryService>>, LibraryError> {
         self.0.as_ref().ok_or_else(|| LibraryError::Database {
             message: "the database is not open".to_owned(),
         })
+    }
+
+    /// Another player starts: Kanade's own pauses.
+    fn pause(&self) {
+        if let Some(playback) = &self.0 {
+            playback.with(Engine::pause);
+        }
     }
 }
 
@@ -112,6 +136,16 @@ impl<R: Runtime> ScanEvents for TauriEvents<R> {
                 update,
             },
         );
+    }
+}
+
+impl<R: Runtime> PlayerEvents for TauriEvents<R> {
+    fn state(&self, state: &PlayerState) {
+        let _ = self.0.emit(PLAYER_STATE, state);
+    }
+
+    fn position(&self, position_ms: u64) {
+        let _ = self.0.emit(PLAYER_POSITION, position_ms);
     }
 }
 
@@ -255,7 +289,12 @@ fn players_of(
     Ok(env.players(&libraries.get()?.player_choice()?))
 }
 
-/// Chooses the player `id` among the ones found, or Windows' own (none).
+/// The id the interface gives Kanade's own player (KAN-8): no program has
+/// it, theirs are paths.
+const BUILTIN: &str = "builtin";
+
+/// Chooses Kanade's own player (`BUILTIN`), Windows' own (none), or a
+/// detected program by its id.
 fn set_player(
     libraries: &Libraries,
     env: &Environment<'_, impl Registry, impl Launcher>,
@@ -264,6 +303,7 @@ fn set_player(
     let service = libraries.get()?;
     let choice = match id {
         None => PlayerChoice::Default,
+        Some(BUILTIN) => PlayerChoice::Builtin,
         Some(id) => {
             let path = env
                 .program_of(&service.player_choice()?, id)
@@ -316,6 +356,124 @@ fn play_tracks(
         .map(TrackFile::of)
         .collect();
     env.play(&service.player_choice()?, &files, enqueue, allow_online)
+}
+
+/// Where tracks go in the built-in player's queue.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AddMode {
+    /// Instead of the queue, from the track at `start`.
+    Play,
+    /// After the track playing.
+    Next,
+    /// At the end.
+    Last,
+}
+
+/// What adding tracks to the built-in player did.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioOutcome {
+    /// Files kept online only (OneDrive), when not allowed to download:
+    /// nothing was added, the interface asks first.
+    pub online: usize,
+    /// Tracks in a format the player does not read, left out.
+    pub left_out: usize,
+    /// None of them read by the player: given to Windows' own player.
+    pub windows: Option<Outcome>,
+}
+
+fn add_to_player(
+    libraries: &Libraries,
+    audio: &Audio,
+    env: &Environment<'_, impl Registry, impl Launcher>,
+    (ids, start): (&[TrackId], usize),
+    mode: AddMode,
+    allow_online: bool,
+) -> Result<AudioOutcome, LibraryError> {
+    let service = libraries.get()?;
+    let player = audio.get()?;
+    let mut read = Vec::new();
+    let mut outcome = AudioOutcome::default();
+    let mut from = 0;
+    for (i, id) in ids.iter().enumerate() {
+        match service.playable(*id)? {
+            Some(track) if track.skip == Some(Skip::Format) => outcome.left_out += 1,
+            Some(track) => {
+                if i == start {
+                    from = read.len();
+                }
+                read.push(track);
+            }
+            None => {}
+        }
+    }
+    if read.is_empty() {
+        if outcome.left_out > 0 {
+            // Opus, APE…: Windows' own player reads them.
+            let files: Vec<TrackFile> = service
+                .track_paths(ids)?
+                .into_iter()
+                .map(TrackFile::of)
+                .collect();
+            let played = env.play(&PlayerChoice::Default, &files, false, allow_online)?;
+            outcome.online = played.online;
+            outcome.left_out = 0;
+            outcome.windows = Some(played);
+        }
+        return Ok(outcome);
+    }
+    if !allow_online {
+        outcome.online = read
+            .iter()
+            .filter(|t| TrackFile::of(t.path.to_string_lossy().into_owned()).online_only)
+            .count();
+        if outcome.online > 0 {
+            return Ok(outcome);
+        }
+    }
+    let ids: Vec<TrackId> = read.iter().map(|t| t.id).collect();
+    player.with(|engine| match mode {
+        AddMode::Play => engine.play(ids, from),
+        AddMode::Next => engine.enqueue(&ids, true),
+        AddMode::Last => engine.enqueue(&ids, false),
+    });
+    Ok(outcome)
+}
+
+/// A button of the built-in player.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(tag = "action", rename_all = "camelCase")]
+pub enum Control {
+    Toggle,
+    Next,
+    Previous,
+    Seek { ms: u64 },
+    Jump { position: usize },
+    Remove { position: usize },
+    Move { from: usize, to: usize },
+    Clear,
+    Volume { volume: f32 },
+    Mute { muted: bool },
+    Repeat { repeat: Repeat },
+    Shuffle { shuffle: bool },
+}
+
+fn control(engine: &mut Engine<Speakers, Arc<LibraryService>>, control: Control) {
+    match control {
+        Control::Toggle => engine.toggle(),
+        Control::Next => engine.next(),
+        Control::Previous => engine.previous(),
+        Control::Seek { ms } => engine.seek(std::time::Duration::from_millis(ms)),
+        Control::Jump { position } => engine.jump(position),
+        Control::Remove { position } => engine.remove(position),
+        Control::Move { from, to } => engine.move_track(from, to),
+        Control::Clear => engine.clear(),
+        Control::Volume { volume } => engine.set_volume(volume),
+        Control::Mute { muted } => engine.set_muted(muted),
+        Control::Repeat { repeat } => engine.set_repeat(repeat),
+        Control::Shuffle { shuffle } => engine.set_shuffle(shuffle),
+    }
 }
 
 fn open_track_with(
@@ -507,8 +665,8 @@ pub fn players_list(
     players_of(&libraries, &windows_players(&playlists.0))
 }
 
-/// Chooses the player `id` among the ones found; Windows' own for none.
-/// Never a path: only an id the list gave.
+/// Chooses the player `id` among the ones found, Kanade's own for
+/// `builtin`, Windows' own for none. Never a path: only an id the list gave.
 #[tauri::command(async)]
 pub fn player_set(
     id: Option<String>,
@@ -562,7 +720,9 @@ pub fn tracks_play(
     allow_online: bool,
     libraries: State<'_, Libraries>,
     playlists: State<'_, Playlists>,
+    audio: State<'_, Audio>,
 ) -> Result<Outcome, LibraryError> {
+    audio.pause();
     play_tracks(
         &libraries,
         &windows_players(&playlists.0),
@@ -578,8 +738,61 @@ pub fn track_open_with(
     id: TrackId,
     libraries: State<'_, Libraries>,
     playlists: State<'_, Playlists>,
+    audio: State<'_, Audio>,
 ) -> Result<(), LibraryError> {
+    audio.pause();
     open_track_with(&libraries, &windows_players(&playlists.0), id)
+}
+
+/// Tracks to the built-in player (KAN-8): played from the one at `start`
+/// instead of the queue, or added after the track playing, or at its end.
+/// The ones in a format it does not read are left out; when none is read,
+/// Windows' own player plays them.
+#[tauri::command(async)]
+pub fn audio_add(
+    ids: Vec<TrackId>,
+    start: usize,
+    mode: AddMode,
+    allow_online: bool,
+    libraries: State<'_, Libraries>,
+    audio: State<'_, Audio>,
+    playlists: State<'_, Playlists>,
+) -> Result<AudioOutcome, LibraryError> {
+    add_to_player(
+        &libraries,
+        &audio,
+        &windows_players(&playlists.0),
+        (&ids, start),
+        mode,
+        allow_online,
+    )
+}
+
+/// A button of the built-in player; its state after it.
+#[tauri::command(async)]
+pub fn audio_control(
+    control: Control,
+    audio: State<'_, Audio>,
+) -> Result<PlayerState, LibraryError> {
+    let command = control;
+    Ok(audio.get()?.with(|engine| self::control(engine, command)))
+}
+
+/// The built-in player as it is: the window asks at its start, then hears
+/// `player-state`.
+#[tauri::command(async)]
+pub fn audio_state(audio: State<'_, Audio>) -> Result<PlayerState, LibraryError> {
+    Ok(audio.get()?.state())
+}
+
+/// The tracks of the built-in player's queue, in its order.
+#[tauri::command(async)]
+pub fn audio_queue(
+    libraries: State<'_, Libraries>,
+    audio: State<'_, Audio>,
+) -> Result<Vec<Playable>, LibraryError> {
+    let ids = audio.get()?.state().queue;
+    libraries.get()?.queue_entries(&ids)
 }
 
 /// The statistics' summary as text, saved where the user chooses; false
@@ -996,12 +1209,12 @@ mod tests {
     fn libraries(dir: &Path) -> Libraries {
         let data = dir.join("data");
         let opened = store::open(&data, store::now_ms()).unwrap();
-        Libraries(Some(LibraryService::new(
+        Libraries(Some(Arc::new(LibraryService::new(
             opened.index,
             store::open_writer(&data).unwrap(),
             Recorder::default(),
             TooBroad::default(),
-        )))
+        ))))
     }
 
     #[test]
@@ -1354,6 +1567,326 @@ mod tests {
         );
     }
 
+    /// The built-in player's events, not heard: a test reads its state.
+    struct Quiet;
+
+    impl PlayerEvents for Quiet {
+        fn state(&self, _: &PlayerState) {}
+        fn position(&self, _: u64) {}
+    }
+
+    /// A library of the fixtures, and a built-in player whose output is
+    /// silent: nothing comes out of the PC.
+    fn with_player(
+        dir: &Path,
+        events: impl PlayerEvents,
+    ) -> (Libraries, Audio, Vec<(TrackId, String)>) {
+        let music = dir.join("Musique");
+        fs::create_dir(&music).unwrap();
+        for (file, _) in crate::library::track::tests::FIXTURES {
+            crate::library::track::tests::tagged_copy(file, &music.join(file), file);
+        }
+        let libraries = libraries(dir);
+        add(&libraries, &Answer(Some(music))).unwrap();
+        let service = Arc::clone(libraries.0.as_ref().unwrap());
+        service.wait_idle();
+        let tracks = service
+            .tracks()
+            .unwrap()
+            .into_iter()
+            .map(|row| (TrackId(row.0), row.13))
+            .collect();
+        let engine = Engine::new(Speakers::silent(), service, 1);
+        let audio = Audio(Some(Playback::start(
+            engine,
+            events,
+            std::time::Duration::from_secs(3600),
+        )));
+        (libraries, audio, tracks)
+    }
+
+    /// KAN-8: tracks to the built-in player by id; the formats it does not
+    /// read left out, or given to Windows' own player when there are only
+    /// those; files kept online only asked about first.
+    #[test]
+    fn the_tracks_go_to_the_built_in_player() {
+        use crate::player::registry::tests::{finder, sample};
+        use crate::player::tests::Recorder as Launches;
+
+        let dir = tempfile::tempdir().unwrap();
+        let (libraries, audio, tracks) = with_player(dir.path(), Quiet);
+        let reg = sample();
+        let launcher = Launches::default();
+        let env = Environment {
+            finder: finder(&reg),
+            launcher: &launcher,
+            playlists: dir.path(),
+            system_root: Some(r"C:\Windows".into()),
+        };
+        let ids: Vec<TrackId> = tracks.iter().map(|(id, _)| *id).collect();
+        let opus = tracks.iter().find(|(_, f)| f == "Opus").unwrap().0;
+        let start = ids.iter().position(|id| *id == opus).unwrap();
+
+        // From the Opus: left out, the player starts with the track after it.
+        let outcome = add_to_player(
+            &libraries,
+            &audio,
+            &env,
+            (&ids, start),
+            AddMode::Play,
+            false,
+        )
+        .unwrap();
+        assert_eq!(outcome.left_out, 1);
+        let state = audio.get().unwrap().state();
+        assert_eq!(state.queue.len(), ids.len() - 1);
+        assert!(state.playing);
+        assert!(!state.queue.contains(&opus));
+
+        add_to_player(
+            &libraries,
+            &audio,
+            &env,
+            (&ids[..1], 0),
+            AddMode::Next,
+            false,
+        )
+        .unwrap();
+        add_to_player(
+            &libraries,
+            &audio,
+            &env,
+            (&ids[..1], 0),
+            AddMode::Last,
+            false,
+        )
+        .unwrap();
+        let queue = audio.get().unwrap().state();
+        assert_eq!(queue.queue.len(), ids.len() + 1);
+        assert_eq!(queue.queue[queue.at.unwrap() + 1], ids[0]);
+        assert_eq!(queue.queue.last(), Some(&ids[0]));
+
+        // Only an Opus: Windows' own player.
+        let outcome =
+            add_to_player(&libraries, &audio, &env, (&[opus], 0), AddMode::Play, false).unwrap();
+        assert!(outcome.windows.unwrap().launched);
+        assert_eq!(launcher.started.borrow().len(), 1);
+        // Nothing known: nothing done.
+        let none = add_to_player(
+            &libraries,
+            &audio,
+            &env,
+            (&[TrackId(9999)], 0),
+            AddMode::Play,
+            false,
+        );
+        assert_eq!(none, Ok(AudioOutcome::default()));
+        assert_eq!(
+            add_to_player(
+                &Libraries(None),
+                &audio,
+                &env,
+                (&ids, 0),
+                AddMode::Play,
+                false
+            )
+            .unwrap_err(),
+            LibraryError::Database {
+                message: "the database is not open".into()
+            }
+        );
+        assert!(Audio(None).get().is_err());
+        Audio(None).pause();
+    }
+
+    /// A file kept online only (OneDrive) is played once the user agrees.
+    #[cfg(windows)]
+    #[test]
+    fn the_built_in_player_asks_before_a_file_online_only() {
+        use crate::player::registry::tests::{finder, sample};
+        use crate::player::tests::Recorder as Launches;
+
+        let dir = tempfile::tempdir().unwrap();
+        let (libraries, audio, tracks) = with_player(dir.path(), Quiet);
+        let reg = sample();
+        let launcher = Launches::default();
+        let env = Environment {
+            finder: finder(&reg),
+            launcher: &launcher,
+            playlists: dir.path(),
+            system_root: None,
+        };
+        let (flac, _) = tracks.iter().find(|(_, f)| f == "FLAC").unwrap();
+        let path = libraries
+            .get()
+            .unwrap()
+            .track_paths(&[*flac])
+            .unwrap()
+            .remove(0);
+        let status = std::process::Command::new("attrib")
+            .arg("+O")
+            .arg(&path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let asked = add_to_player(
+            &libraries,
+            &audio,
+            &env,
+            (&[*flac], 0),
+            AddMode::Play,
+            false,
+        )
+        .unwrap();
+        assert_eq!(asked.online, 1);
+        assert!(audio.get().unwrap().state().queue.is_empty());
+        add_to_player(&libraries, &audio, &env, (&[*flac], 0), AddMode::Play, true).unwrap();
+        assert_eq!(audio.get().unwrap().state().queue, [*flac]);
+    }
+
+    /// KAN-8: the built-in player's commands through Tauri, and its state
+    /// heard by the window.
+    #[test]
+    fn the_built_in_player_answers_through_tauri() {
+        use std::sync::mpsc;
+        use tauri::Listener;
+
+        let dir = tempfile::tempdir().unwrap();
+        let app = tauri::test::mock_builder()
+            .invoke_handler(tauri::generate_handler![
+                audio_add,
+                audio_control,
+                audio_state,
+                audio_queue,
+                tracks_play,
+            ])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let (libraries, audio, tracks) = with_player(dir.path(), TauriEvents(app.handle().clone()));
+        app.manage(libraries);
+        app.manage(audio);
+        app.manage(Playlists(dir.path().join("playlists")));
+        let (told, heard) = mpsc::channel();
+        app.listen_any(PLAYER_STATE, move |event| {
+            let _ = told.send(event.payload().to_owned());
+        });
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let readable: Vec<i64> = tracks
+            .iter()
+            .filter(|(_, f)| crate::audio::reads(f))
+            .map(|(id, _)| id.0)
+            .collect();
+
+        let empty = invoke(&webview, "audio_state", serde_json::json!({})).unwrap();
+        assert_eq!(empty["current"], serde_json::Value::Null);
+        assert_eq!(empty["volume"], 1.0);
+        let added = invoke(
+            &webview,
+            "audio_add",
+            serde_json::json!({ "ids": readable, "start": 1, "mode": "play", "allowOnline": false }),
+        )
+        .unwrap();
+        assert_eq!(
+            added,
+            serde_json::json!({ "online": 0, "leftOut": 0, "windows": null })
+        );
+        let state = invoke(&webview, "audio_state", serde_json::json!({})).unwrap();
+        assert_eq!(state["current"]["id"], readable[1]);
+        assert_eq!(state["playing"], true);
+        let told: serde_json::Value = serde_json::from_str(
+            &heard
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(told["current"]["id"], readable[1]);
+
+        let control = |control: serde_json::Value| {
+            invoke(
+                &webview,
+                "audio_control",
+                serde_json::json!({ "control": control }),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            control(serde_json::json!({ "action": "toggle" }))["playing"],
+            false
+        );
+        assert_eq!(
+            control(serde_json::json!({ "action": "next" }))["current"]["id"],
+            readable[2]
+        );
+        assert_eq!(
+            control(serde_json::json!({ "action": "previous" }))["current"]["id"],
+            readable[1]
+        );
+        assert_eq!(
+            control(serde_json::json!({ "action": "jump", "position": 0 }))["at"],
+            0
+        );
+        // A silent output never plays, nor seeks: the answer comes all the same.
+        assert!(control(serde_json::json!({ "action": "seek", "ms": 500 }))["positionMs"].is_u64());
+        assert_eq!(
+            control(serde_json::json!({ "action": "move", "from": 0, "to": 2 }))["at"],
+            2
+        );
+        assert_eq!(
+            control(serde_json::json!({ "action": "volume", "volume": 0.25 }))["volume"],
+            0.25
+        );
+        assert_eq!(
+            control(serde_json::json!({ "action": "mute", "muted": true }))["muted"],
+            true
+        );
+        assert_eq!(
+            control(serde_json::json!({ "action": "repeat", "repeat": "one" }))["repeat"],
+            "one"
+        );
+        assert_eq!(
+            control(serde_json::json!({ "action": "shuffle", "shuffle": true }))["shuffle"],
+            true
+        );
+        let queue = invoke(&webview, "audio_queue", serde_json::json!({})).unwrap();
+        assert_eq!(queue.as_array().unwrap().len(), readable.len());
+        assert!(queue[0]["title"].is_string());
+        assert_eq!(queue[0]["skip"], serde_json::Value::Null);
+        assert!(queue[0].get("path").is_none(), "no path goes to the window");
+        assert_eq!(
+            control(serde_json::json!({ "action": "remove", "position": 0 }))["queue"]
+                .as_array()
+                .unwrap()
+                .len(),
+            readable.len() - 1
+        );
+        let cleared = control(serde_json::json!({ "action": "clear" }));
+        assert_eq!(cleared["queue"], serde_json::json!([]));
+        assert_eq!(cleared["current"], serde_json::Value::Null);
+        // Another player played: Kanade's own paused (nothing to pause here).
+        let unknown = invoke(
+            &webview,
+            "tracks_play",
+            serde_json::json!({ "ids": [9999], "enqueue": false, "allowOnline": false }),
+        );
+        assert_eq!(unknown.unwrap_err()["code"], "track_not_found");
+    }
+
+    /// A track gone from the index shows in the queue without a title.
+    #[test]
+    fn a_track_gone_from_the_index_stays_in_the_queue_untitled() {
+        let dir = tempfile::tempdir().unwrap();
+        let libraries = libraries(dir.path());
+        let entries = libraries
+            .get()
+            .unwrap()
+            .queue_entries(&[TrackId(7)])
+            .unwrap();
+        assert_eq!(entries[0].title, "");
+        assert_eq!(entries[0].skip, Some(Skip::Gone));
+    }
+
     /// Runs a command as the interface does, through Tauri's IPC.
     fn invoke(
         webview: &tauri::WebviewWindow<tauri::test::MockRuntime>,
@@ -1427,13 +1960,14 @@ mod tests {
         }
         let data = dir.path().join("data");
         let opened = store::open(&data, store::now_ms()).unwrap();
-        app.manage(Libraries(Some(LibraryService::new(
+        app.manage(Libraries(Some(Arc::new(LibraryService::new(
             opened.index,
             store::open_writer(&data).unwrap(),
             TauriEvents(app.handle().clone()),
             TooBroad::default(),
-        ))));
+        )))));
         app.manage(Playlists(dir.path().join("playlists")));
+        app.manage(Audio(None));
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .unwrap();
@@ -1637,6 +2171,13 @@ mod tests {
         assert!(players["detected"].is_array());
         let own = invoke(&webview, "player_set", serde_json::json!({ "id": null })).unwrap();
         assert_eq!(own["chosen"]["kind"], "default");
+        let kanade = invoke(
+            &webview,
+            "player_set",
+            serde_json::json!({ "id": "builtin" }),
+        )
+        .unwrap();
+        assert_eq!(kanade["chosen"]["kind"], "builtin");
         assert_eq!(
             invoke(&webview, "player_icon", serde_json::json!({ "id": "nope" })).unwrap_err(),
             serde_json::json!({ "code": "player_not_found" })
