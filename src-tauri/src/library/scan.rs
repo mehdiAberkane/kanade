@@ -154,6 +154,9 @@ pub enum LibraryError {
     /// The file chosen to import marks from is not one Kanade or Ongaku
     /// wrote (KAN-32).
     NotMarksFile,
+    /// What came to be saved as the statistics' summary is not a text of a
+    /// reasonable size, or not a PNG (KAN-36).
+    NotASummary,
     /// The folder to leave out is not inside the library `name` (KAN-43):
     /// elsewhere, or its own folder.
     NotInLibrary {
@@ -184,6 +187,7 @@ impl fmt::Display for LibraryError {
             Self::TrackNotFound => f.write_str("no such track"),
             Self::NotAnImage => f.write_str("not a JPEG image Kanade can show"),
             Self::NotMarksFile => f.write_str("not a file of favourites and ratings"),
+            Self::NotASummary => f.write_str("not a summary Kanade can save"),
             Self::NotInLibrary { name } => {
                 write!(f, "this folder is not inside the library {name}")
             }

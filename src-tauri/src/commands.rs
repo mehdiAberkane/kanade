@@ -23,6 +23,7 @@ use crate::library::{
     LibraryView, Mark, RevealTarget, ScanErrors, ScanEvents, ScanProgress, Settings, TrackId,
     TrackRow, TrackView, WatchUpdate,
 };
+use crate::summary;
 
 /// The folder of the covers' thumbnails, apart from the database
 /// (`%LOCALAPPDATA%\fr.devsecopsforce.kanade\cache\covers`).
@@ -112,6 +113,7 @@ trait Dialogs {
     /// A folder, the picker opened in `start`.
     fn pick_subfolder(&self, title: &str, start: &Path) -> Option<PathBuf>;
     fn save_text(&self, title: &str, file_name: &str) -> Option<PathBuf>;
+    fn save_png(&self, title: &str, file_name: &str) -> Option<PathBuf>;
     /// A JSON file to save (`save`) or to open.
     fn json_file(&self, title: &str, save: Option<&str>) -> Option<PathBuf>;
 }
@@ -158,6 +160,15 @@ impl<R: Runtime> Dialogs for WindowDialogs<R> {
             .save_file()
     }
 
+    fn save_png(&self, title: &str, file_name: &str) -> Option<PathBuf> {
+        rfd::FileDialog::new()
+            .set_title(title)
+            .set_file_name(file_name)
+            .add_filter("Image PNG", &["png"])
+            .set_parent(&self.0)
+            .save_file()
+    }
+
     fn json_file(&self, title: &str, save: Option<&str>) -> Option<PathBuf> {
         let dialog = rfd::FileDialog::new()
             .set_title(title)
@@ -188,6 +199,29 @@ fn relocate(
         return Ok(None);
     };
     service.relocate(id, &folder).map(Some)
+}
+
+/// Saves the statistics' summary as text where the user chooses (KAN-36);
+/// false when the dialog is closed.
+fn save_summary_text(dialogs: &impl Dialogs, text: &str) -> Result<bool, LibraryError> {
+    summary::check_text(text)?;
+    let Some(path) = dialogs.save_text("Enregistrer le résumé", "Kanade - statistiques.txt")
+    else {
+        return Ok(false);
+    };
+    summary::write(&path, text.as_bytes())?;
+    Ok(true)
+}
+
+/// Saves the summary's picture, the PNG the interface drew.
+fn save_summary_image(dialogs: &impl Dialogs, png: &[u8]) -> Result<bool, LibraryError> {
+    summary::check_image(png)?;
+    let Some(path) = dialogs.save_png("Enregistrer l'image du résumé", "Kanade - statistiques.png")
+    else {
+        return Ok(false);
+    };
+    summary::write(&path, png)?;
+    Ok(true)
 }
 
 /// Asks which folder of the library to leave out (KAN-43), the picker
@@ -317,6 +351,29 @@ pub fn library_cancel_scan(
 ) -> Result<(), LibraryError> {
     libraries.get()?.cancel_scan(id);
     Ok(())
+}
+
+/// The statistics' summary as text, saved where the user chooses; false
+/// when the dialog is closed.
+#[tauri::command(async)]
+pub fn stats_save_text<R: Runtime>(
+    text: String,
+    window: WebviewWindow<R>,
+) -> Result<bool, LibraryError> {
+    save_summary_text(&WindowDialogs(window), &text)
+}
+
+/// The summary's picture, the PNG the interface drew, as the raw body of
+/// the call; saved where the user chooses.
+#[tauri::command(async)]
+pub fn stats_save_image<R: Runtime>(
+    window: WebviewWindow<R>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<bool, LibraryError> {
+    let tauri::ipc::InvokeBody::Raw(png) = request.body() else {
+        return Err(LibraryError::NotASummary);
+    };
+    save_summary_image(&WindowDialogs(window), png)
 }
 
 /// Asks which of its folders the library leaves out (KAN-43): its tracks
@@ -625,6 +682,9 @@ mod tests {
         fn save_text(&self, _: &str, _: &str) -> Option<PathBuf> {
             self.0.clone()
         }
+        fn save_png(&self, _: &str, _: &str) -> Option<PathBuf> {
+            self.0.clone()
+        }
         fn json_file(&self, _: &str, _: Option<&str>) -> Option<PathBuf> {
             self.0.clone()
         }
@@ -765,6 +825,27 @@ mod tests {
         let to = dir.path().join("errors.txt");
         assert!(export_errors(&libraries, &Answer(Some(to.clone())), library.id).unwrap());
         assert!(fs::read_to_string(&to).unwrap().contains("broken.mp3"));
+    }
+
+    /// KAN-36: the summary goes where the user chose, as text or as a
+    /// PNG; anything else is refused before the dialog opens.
+    #[test]
+    fn the_summary_is_saved_where_the_user_chose() {
+        let dir = tempfile::tempdir().unwrap();
+        let text = dir.path().join("résumé.txt");
+        assert!(save_summary_text(&Answer(Some(text.clone())), "50 000 morceaux").unwrap());
+        assert_eq!(fs::read_to_string(&text).unwrap(), "50 000 morceaux");
+        assert!(!save_summary_text(&Answer(None), "x").unwrap());
+
+        let png = dir.path().join("résumé.png");
+        let picture = b"\x89PNG\r\n\x1a\nIHDR";
+        assert!(save_summary_image(&Answer(Some(png.clone())), picture).unwrap());
+        assert_eq!(fs::read(&png).unwrap(), picture);
+        assert!(!save_summary_image(&Answer(None), picture).unwrap());
+        assert_eq!(
+            save_summary_image(&Answer(Some(png)), b"GIF89a").unwrap_err(),
+            LibraryError::NotASummary
+        );
     }
 
     #[test]
