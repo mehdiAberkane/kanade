@@ -63,6 +63,8 @@ pub struct TrackRow(
     pub i64,
     /// Its tags hold a picture: the album's cover is taken from such a track.
     pub bool,
+    /// No title tag: the title shown is the file's name (KAN-28, « Sans titre »).
+    pub bool,
 );
 
 /// Where « Afficher dans l'Explorateur » goes: the file, selected, or its
@@ -196,7 +198,9 @@ impl Index {
                 "missing" => 2,
                 _ => 0,
             };
-            let title = r.get::<_, Option<String>>(4)?.unwrap_or_else(|| {
+            let tagged: Option<String> = r.get(4)?;
+            let untitled = tagged.is_none();
+            let title = tagged.unwrap_or_else(|| {
                 Path::new(&path)
                     .file_stem()
                     .map_or_else(String::new, |s| s.to_string_lossy().into_owned())
@@ -222,6 +226,7 @@ impl Index {
                 r.get(16)?,
                 r.get(17)?,
                 r.get(18)?,
+                untitled,
             ));
         }
         Ok(list)
@@ -382,15 +387,17 @@ mod tests {
         // tagged_copy writes a cover; the untagged file has none.
         assert!(mp3.19);
         assert!(rows.iter().any(|r| r.5 == "Untagged song" && !r.19));
-        // No title tag: the file name.
-        assert!(rows.iter().any(|r| r.5 == "Untagged song"));
+        // No title tag: the file name, and said so (KAN-28).
+        assert!(rows.iter().any(|r| r.5 == "Untagged song" && r.20));
+        assert!(!mp3.20);
 
         // The interface reads arrays.
         let json = serde_json::to_value(mp3).unwrap();
         assert_eq!(json[0], mp3.0);
         assert_eq!(json[5], "Title of tone.mp3");
-        assert_eq!(json.as_array().unwrap().len(), 20);
+        assert_eq!(json.as_array().unwrap().len(), 21);
         assert_eq!(json[19], true);
+        assert_eq!(json[20], false);
     }
 
     #[test]

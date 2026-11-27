@@ -283,6 +283,31 @@ pub fn settings_set(
     libraries.get()?.save_settings(&settings)
 }
 
+/// The health reports the user chose to ignore (KAN-28).
+#[tauri::command(async)]
+pub fn health_ignored_get(libraries: State<'_, Libraries>) -> Result<Vec<String>, LibraryError> {
+    libraries.get()?.health_ignored()
+}
+
+/// Keeps the reports ignored, made safe; returns what was kept.
+#[tauri::command(async)]
+pub fn health_ignored_set(
+    ignored: Vec<String>,
+    libraries: State<'_, Libraries>,
+) -> Result<Vec<String>, LibraryError> {
+    libraries.get()?.save_health_ignored(ignored)
+}
+
+/// Of these tracks (one per album without a cover in its tags), those
+/// whose folder holds no cover image either. By id: no path comes in.
+#[tauri::command(async)]
+pub fn tracks_without_folder_cover(
+    ids: Vec<TrackId>,
+    libraries: State<'_, Libraries>,
+) -> Result<Vec<TrackId>, LibraryError> {
+    libraries.get()?.without_folder_cover(&ids)
+}
+
 /// How Kanade looks: the Appearance page (`library/appearance.rs`).
 #[tauri::command(async)]
 pub fn appearance_get(libraries: State<'_, Libraries>) -> Result<Appearance, LibraryError> {
@@ -733,6 +758,9 @@ mod tests {
                 track_view_set,
                 album_view_get,
                 album_view_set,
+                health_ignored_get,
+                health_ignored_set,
+                tracks_without_folder_cover,
             ])
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap();
@@ -909,6 +937,29 @@ mod tests {
         assert_eq!(
             invoke(&webview, "album_view_get", serde_json::json!({})).unwrap()["size"],
             320
+        );
+
+        assert_eq!(
+            invoke(
+                &webview,
+                "health_ignored_set",
+                serde_json::json!({ "ignored": ["track-gaps|album:a", "track-gaps|album:a"] })
+            )
+            .unwrap(),
+            serde_json::json!(["track-gaps|album:a"])
+        );
+        assert_eq!(
+            invoke(&webview, "health_ignored_get", serde_json::json!({})).unwrap(),
+            serde_json::json!(["track-gaps|album:a"])
+        );
+        assert_eq!(
+            invoke(
+                &webview,
+                "tracks_without_folder_cover",
+                serde_json::json!({ "ids": [9999] })
+            )
+            .unwrap(),
+            serde_json::json!([])
         );
 
         assert_eq!(

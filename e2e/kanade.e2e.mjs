@@ -26,6 +26,17 @@ async function launch() {
     "the database in the test's folder: is kanade.exe the e2e build (npm run build:e2e)?",
     15_000,
   );
+  // After a restart the database is there already: the page may still be
+  // loading, without Tauri's bridge yet.
+  await waitFor(
+    () =>
+      kanade.run(
+        `return document.readyState === "complete" && "__TAURI_INTERNALS__" in window ` +
+          `&& document.querySelector(".app") !== null;`,
+      ),
+    "Kanade's page loaded",
+    15_000,
+  );
   return kanade;
 }
 

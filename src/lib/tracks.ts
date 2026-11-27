@@ -26,6 +26,7 @@ export type TrackRow = [
   addedMs: number | null,
   modifiedMs: number,
   hasCover: boolean,
+  untitled: boolean,
 ];
 
 type TrackStatus = "present" | "unreadable" | "missing";
@@ -53,6 +54,8 @@ export interface Track {
   modifiedMs: number;
   /** Its tags hold a picture: an album's cover comes from such a track. */
   hasCover: boolean;
+  /** No title tag: `title` is the file's name. */
+  untitled: boolean;
 }
 
 const STATUSES: TrackStatus[] = ["present", "unreadable", "missing"];
@@ -79,6 +82,7 @@ export function fromRow(row: TrackRow): Track {
     addedMs: row[17],
     modifiedMs: row[18],
     hasCover: row[19],
+    untitled: row[20],
   };
 }
 

@@ -175,6 +175,23 @@ describe("the fake watch of the folders", () => {
   });
 });
 
+describe("the fake health of the library", () => {
+  it("keeps the reports ignored, and says which folders lack a cover image", async () => {
+    setup();
+    expect(await invoke("health_ignored_get")).toEqual([]);
+    expect(
+      await invoke("health_ignored_set", { ignored: ["no-genre|track:1", "", "no-genre|track:1"] }),
+    ).toEqual(["no-genre|track:1"]);
+    expect(await invoke("health_ignored_get")).toEqual(["no-genre|track:1"]);
+    expect(await invoke("health_ignored_set", {})).toEqual([]);
+
+    const ids = (await invoke<TrackRow[]>("tracks_list")).slice(0, 6).map((r) => r[0]);
+    const answer = await invoke<number[]>("tracks_without_folder_cover", { ids: [...ids, -1] });
+    expect(answer).toEqual(ids.filter((id) => id % 3 !== 0));
+    expect(await invoke("tracks_without_folder_cover", {})).toEqual([]);
+  });
+});
+
 describe("fake tracks", () => {
   it("lists the tracks of each library, the same at each call", async () => {
     setup();

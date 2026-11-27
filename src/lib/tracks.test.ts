@@ -52,6 +52,7 @@ function track(fields: Partial<Track> = {}): Track {
     addedMs: null,
     modifiedMs: 0,
     hasCover: false,
+    untitled: false,
     ...fields,
   };
 }
@@ -83,6 +84,7 @@ describe("rows", () => {
       9,
       10,
       true,
+      false,
     ];
     expect(fromRow(row)).toEqual({
       id: 7,
@@ -105,6 +107,7 @@ describe("rows", () => {
       addedMs: 9,
       modifiedMs: 10,
       hasCover: true,
+      untitled: false,
     });
     expect(fromRow([...row.slice(0, 2), 1, ...row.slice(3)] as TrackRow).status).toBe("unreadable");
     expect(fromRow([...row.slice(0, 2), 9, ...row.slice(3)] as TrackRow).status).toBe("present");

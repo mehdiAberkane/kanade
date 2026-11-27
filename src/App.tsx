@@ -4,6 +4,7 @@ import { AppearancePage } from "./components/AppearancePage";
 import { AppearanceProvider } from "./components/AppearanceProvider";
 import { DatabaseBanner } from "./components/DatabaseBanner";
 import { DropZone } from "./components/DropZone";
+import { HealthPage } from "./components/HealthPage";
 import { LibrariesPage } from "./components/LibrariesPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { TracksPage } from "./components/TracksPage";
@@ -12,7 +13,7 @@ import { statusLine } from "./lib/updater";
 import { useBackgroundUpdateCheck, useUpdater } from "./lib/useUpdater";
 import "./App.css";
 
-type Page = "tracks" | "libraries" | "appearance" | "settings";
+type Page = "tracks" | "libraries" | "health" | "appearance" | "settings";
 
 function App() {
   const [version, setVersion] = useState("");
@@ -44,6 +45,9 @@ function App() {
             <NavButton current={page} page="libraries" onSelect={setPage}>
               Bibliothèques
             </NavButton>
+            <NavButton current={page} page="health" onSelect={setPage}>
+              Santé
+            </NavButton>
             <NavButton current={page} page="appearance" onSelect={setPage}>
               Apparence
             </NavButton>
@@ -64,6 +68,7 @@ function App() {
             />
           )}
           {page === "libraries" && <LibrariesPage />}
+          {page === "health" && <HealthPage />}
           {page === "appearance" && <AppearancePage />}
           {page === "settings" && <SettingsPage version={version} onInstall={confirm} />}
         </main>

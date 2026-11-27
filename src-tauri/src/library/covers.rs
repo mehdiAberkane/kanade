@@ -146,6 +146,12 @@ struct FolderImage {
     key: u64,
 }
 
+/// Whether the track's folder holds a cover image Kanade would show
+/// (KAN-28, « Sans pochette »).
+pub fn has_folder_image(track: &Path) -> bool {
+    folder_image(track).is_some()
+}
+
 /// The cover image of the track's folder (`cover.jpg`, `Folder.JPG`…), if
 /// one is on the disk and small enough to read.
 fn folder_image(track: &Path) -> Option<FolderImage> {

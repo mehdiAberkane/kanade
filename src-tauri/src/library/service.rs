@@ -350,6 +350,33 @@ impl LibraryService {
         Ok(self.index().save_album_view(view)?)
     }
 
+    /// The health reports the user chose to ignore (KAN-28).
+    pub fn health_ignored(&self) -> Result<Vec<String>, LibraryError> {
+        Ok(self.index().health_ignored()?)
+    }
+
+    pub fn save_health_ignored(&self, ignored: Vec<String>) -> Result<Vec<String>, LibraryError> {
+        Ok(self.index().save_health_ignored(ignored)?)
+    }
+
+    /// Of these tracks, those present whose folder holds no cover image
+    /// (KAN-28): the interface asks for one track per album without a
+    /// picture in its tags. The disk is read off the database's lock.
+    pub fn without_folder_cover(&self, ids: &[TrackId]) -> Result<Vec<TrackId>, LibraryError> {
+        let sources: Vec<_> = {
+            let index = self.index();
+            ids.iter()
+                .filter_map(|id| index.cover_source(*id).ok())
+                .filter(|source| source.present)
+                .collect()
+        };
+        Ok(sources
+            .into_iter()
+            .filter(|source| !covers::has_folder_image(Path::new(&source.path)))
+            .map(|source| TrackId(source.id))
+            .collect())
+    }
+
     pub fn appearance(&self) -> Result<Appearance, LibraryError> {
         Ok(self.index().appearance()?)
     }
@@ -749,6 +776,39 @@ mod tests {
         assert!(ids(&album).is_empty());
         let moved = &events.updates.lock().unwrap()[1].1;
         assert_eq!((moved.added, moved.updated), (0, 200));
+    }
+
+    #[test]
+    fn tells_the_tracks_whose_folder_holds_no_cover_image() {
+        let s = setup();
+        let root = music(&s, "Musique");
+        let library = s.service.add(&root).unwrap();
+        s.service.wait_idle();
+        let ids: Vec<TrackId> = s
+            .service
+            .tracks()
+            .unwrap()
+            .iter()
+            .map(|r| TrackId(r.0))
+            .collect();
+        let first = ids[0];
+        assert_eq!(
+            s.service
+                .without_folder_cover(&[first, TrackId(9999)])
+                .unwrap(),
+            vec![first],
+            "an unknown id is left out"
+        );
+        fs::write(Path::new(&library.root).join("Folder.JPG"), b"jpeg").unwrap();
+        assert!(s.service.without_folder_cover(&[first]).unwrap().is_empty());
+
+        // A track gone from the disk: nothing to say about its folder.
+        let gone = s.service.index().cover_source(first).unwrap().path;
+        fs::remove_file(&gone).unwrap();
+        fs::remove_file(Path::new(&library.root).join("Folder.JPG")).unwrap();
+        s.service.scan(library.id, false).unwrap();
+        s.service.wait_idle();
+        assert!(s.service.without_folder_cover(&[first]).unwrap().is_empty());
     }
 
     #[test]

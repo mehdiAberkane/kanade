@@ -253,6 +253,7 @@ export function createMockLibraries({
   };
   let view: TrackView | null = null;
   let albumView: AlbumView | null = null;
+  let healthIgnored: string[] = [];
   const now = Date.now();
   /** The tracks of each library, made once per library, folder and count. */
   const made = new Map<string, TrackRow[]>();
@@ -443,6 +444,20 @@ export function createMockLibraries({
       case "track_cover": {
         const row = rowById(idOf(args));
         return row ? coverOf(row) : refuse({ code: "track_not_found" });
+      }
+      case "health_ignored_get":
+        return [...healthIgnored];
+      case "health_ignored_set":
+        // Made safe as the Rust side does: none empty, none twice.
+        healthIgnored = [
+          ...new Set(((args as { ignored?: string[] }).ignored ?? []).filter(Boolean)),
+        ];
+        return [...healthIgnored];
+      case "tracks_without_folder_cover": {
+        // The albums without a picture in their tags: a third have a
+        // cover.jpg in their folder, the others none.
+        const ids = (args as { ids?: number[] }).ids ?? [];
+        return ids.filter((id) => rowById(id) && id % 3 !== 0);
       }
       case "album_view_get":
         return albumView;

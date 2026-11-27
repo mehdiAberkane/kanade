@@ -33,6 +33,7 @@ function track(id: number, title: string): Track {
     addedMs: null,
     modifiedMs: 0,
     hasCover: false,
+    untitled: false,
   };
 }
 

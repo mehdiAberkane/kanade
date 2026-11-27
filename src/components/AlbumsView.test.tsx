@@ -56,6 +56,7 @@ function row(fields: {
     fields.added ?? null,
     1_700_000_000_000,
     fields.cover ?? false,
+    false,
   ];
 }
 

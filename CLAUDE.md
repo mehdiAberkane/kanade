@@ -205,6 +205,13 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   - Pas de SQL, donc rien de tapé n'atteint une requête.
   - Un panneau ou un menu qui se ferme sur Échap écoute en capture et marque la touche
     traitée, pour que la page dessous (un artiste, un album) ne recule pas aussi.
+- Santé de la bibliothèque (KAN-28, page « Santé », `src/lib/health.ts`) : chaque contrôle
+  est une fonction pure sur les mêmes lignes que la liste, calculée dans l'interface (pas
+  de cache). Seule la présence d'une image de pochette dans un dossier est demandée au
+  Rust (`tracks_without_folder_cover`, par identifiant). Les règles sont dans
+  `docs/sante.md`, à garder pareilles qu'Ongaku (ONG-59). Les signalements ignorés vont
+  dans `settings` (`health_ignored`). Mesuré sur 50 000 morceaux : albums en 95 ms, puis
+  contrôles en 100 ms, lancés juste après l'affichage de la page.
 - Pochettes (`library/covers.rs`, `src/lib/covers.ts`) :
   - `track_cover` reçoit un identifiant de morceau et renvoie un JPEG de 400 ou 900 px,
     jamais l'image d'origine ni un chemin ;
