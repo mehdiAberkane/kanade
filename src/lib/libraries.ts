@@ -82,6 +82,11 @@ export type LibraryError =
   | { code: "not_marks_file" }
   | { code: "not_in_library"; name: string }
   | { code: "not_a_summary" }
+  | { code: "file_gone"; name: string }
+  | { code: "path_too_long"; name: string }
+  | { code: "player_not_found" }
+  | { code: "not_a_program" }
+  | { code: "launch_failed"; message: string }
   | { code: "io"; message: string }
   | { code: "database"; message: string };
 
@@ -197,6 +202,19 @@ export function errorText(error: unknown): string {
       );
     case "not_a_summary":
       return "Ce résumé ne peut pas être enregistré.";
+    case "file_gone":
+      return `Ce fichier n'est plus sur le disque : ${error.name}. Rien n'a été lancé.`;
+    case "path_too_long":
+      return (
+        `Le chemin de ${error.name} est trop long pour la plupart des lecteurs : ` +
+        "raccourcis le nom de son dossier."
+      );
+    case "player_not_found":
+      return "Ce lecteur est introuvable : il a peut-être été désinstallé ou déplacé.";
+    case "not_a_program":
+      return "Ce fichier n'est pas un programme : choisis le .exe d'un lecteur.";
+    case "launch_failed":
+      return `Le lecteur n'a pas démarré : ${error.message}`;
     case "not_in_library":
       return `Ce dossier n'est pas dans la bibliothèque « ${error.name} » : choisis un de ses sous-dossiers.`;
     case "io":
