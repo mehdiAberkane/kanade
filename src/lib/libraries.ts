@@ -1,6 +1,7 @@
 // The libraries (Rust: library::LibraryView and the commands of
 // commands.rs) and what the interface says about them.
 import type { Exclusions } from "./exclusions";
+import type { TagField } from "./tags";
 
 export interface ScanProgress {
   /** Audio files met so far. */
@@ -87,6 +88,9 @@ export type LibraryError =
   | { code: "player_not_found" }
   | { code: "not_a_program" }
   | { code: "launch_failed"; message: string }
+  | { code: "invalid_tag"; field: TagField }
+  | { code: "tags_busy" }
+  | { code: "nothing_to_undo" }
   | { code: "io"; message: string }
   | { code: "database"; message: string };
 
@@ -215,6 +219,13 @@ export function errorText(error: unknown): string {
       return "Ce fichier n'est pas un programme : choisis le .exe d'un lecteur.";
     case "launch_failed":
       return `Le lecteur n'a pas démarré : ${error.message}`;
+    case "invalid_tag":
+      // The editor checks first: only a value it let through by mistake.
+      return "Une des valeurs ne peut pas être écrite dans un tag : rien n'a été modifié.";
+    case "tags_busy":
+      return "Des tags sont déjà en cours d'écriture : attends la fin, ou arrête-la.";
+    case "nothing_to_undo":
+      return "Aucune modification des tags à annuler.";
     case "not_in_library":
       return `Ce dossier n'est pas dans la bibliothèque « ${error.name} » : choisis un de ses sous-dossiers.`;
     case "io":

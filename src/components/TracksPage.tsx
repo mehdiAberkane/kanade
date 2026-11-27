@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { cardState, formatNumber, type Settings } from "../lib/libraries";
 import { MarksContext } from "../lib/marks";
 import { onlineQuestion, PlayerContext } from "../lib/player";
 import { usePlayer } from "../lib/usePlayer";
+import { TagEditingContext, useTagEditor } from "../lib/useTagEditor";
 import {
   filterCount,
   matcher,
@@ -19,6 +20,7 @@ import { AlbumsView } from "./AlbumsView";
 import type { TracksStart } from "./StatsPage";
 import { ArtistsView } from "./ArtistsView";
 import { SearchBar } from "./SearchBar";
+import { TagEditor } from "./TagEditor";
 import { TrackTable } from "./TrackTable";
 
 const BADGES = { scanning: "scan", queued: "en attente", offline: "hors ligne", idle: null };
@@ -47,8 +49,9 @@ export function TracksPage({
 }) {
   const [tab, setTab] = useState<Tab>("tracks");
   const { libraries } = useLibraries();
-  const { tracks, error, mark, markError } = useTracks();
+  const { tracks, error, mark, markError, refresh } = useTracks();
   const player = usePlayer();
+  const tagEditor = useTagEditor(useCallback(() => void refresh(), [refresh]));
   const news = useWatchNews();
   const { view, update } = useTrackView();
   const { add, adding, refusal } = useAddLibrary();
@@ -326,9 +329,23 @@ export function TracksPage({
         )}
         <div className="view-panel" id="view-panel" role="tabpanel" aria-labelledby={`tab-${tab}`}>
           <PlayerContext.Provider value={player.playback}>
-            <MarksContext.Provider value={mark}>{main}</MarksContext.Provider>
+            <MarksContext.Provider value={mark}>
+              <TagEditingContext.Provider value={tagEditor.editing}>
+                {main}
+              </TagEditingContext.Provider>
+            </MarksContext.Provider>
           </PlayerContext.Provider>
         </div>
+        {tagEditor.open && (
+          <TagEditor
+            tracks={tagEditor.tracks}
+            run={tagEditor.run}
+            onWrite={tagEditor.write}
+            onUndo={tagEditor.undo}
+            onCancel={tagEditor.cancel}
+            onClose={tagEditor.close}
+          />
+        )}
       </section>
     </div>
   );

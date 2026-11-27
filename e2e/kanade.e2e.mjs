@@ -2,7 +2,7 @@
 // tauri-driver (e2e/setup.mjs): a library added from the interface, its
 // tracks listed as the Rust side read them, and all of it found again after
 // a restart, from the database.
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, inject, it } from "vitest";
 import { Session, waitFor } from "./webdriver.mjs";
@@ -246,4 +246,76 @@ it("shows a file copied into the library while it is open", async () => {
   expect(await kanade.run(`return document.querySelector(".watch-news").textContent;`)).toBe(
     "1 morceau ajouté",
   );
+});
+
+/** Opens the track menu on the first row, as a right click does. */
+function menuOnFirstRow() {
+  return kanade.run(`
+    const row = document.querySelector('[role="row"][aria-rowindex="2"]');
+    const box = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, cancelable: true, clientX: box.left + 40, clientY: box.top + 5,
+    }));
+    return row.id.replace("track-", "");
+  `);
+}
+
+/** The title of the editor's window, once it shows one. */
+function editorTitle(title) {
+  return waitFor(
+    () =>
+      kanade.run(
+        `return document.getElementById("tag-editor-title")?.textContent === arguments[0];`,
+        title,
+      ),
+    `the tag editor's « ${title} »`,
+  );
+}
+
+/** Whether the file holds `text`, in the encodings the tags use. */
+function holds(path, text) {
+  const bytes = readFileSync(path);
+  return (
+    bytes.includes(Buffer.from(text, "latin1")) || bytes.includes(Buffer.from(text, "utf16le"))
+  );
+}
+
+// KAN-7: a title typed in the tag editor is written into the file itself,
+// then the undo takes it out again.
+it("writes a title into the file from the tag editor, and undoes it", async () => {
+  await launch();
+  let seen = [];
+  await waitFor(
+    async () => {
+      seen = await rows();
+      return seen.length >= files.length;
+    },
+    () => `the tracks in the list, ${seen.length} shown`,
+  );
+  const id = await menuOnFirstRow();
+  const path = await kanade.run(
+    `return window.__TAURI_INTERNALS__.invoke("tracks_list").then(
+      (rows) => rows.find((r) => String(r[0]) === arguments[0])[4],
+    );`,
+    id,
+  );
+  const title = "Written by Kanade";
+  expect(holds(path, title)).toBe(false);
+
+  await kanade.click(`//button[normalize-space()="Modifier les tags…"]`);
+  await editorTitle("Modifier les tags");
+  await kanade.type(`//input[@id="tag-title"]`, title);
+  await kanade.click(`//button[normalize-space()="Enregistrer"]`);
+  await editorTitle("Tags enregistrés");
+  expect(holds(path, title)).toBe(true);
+  await kanade.click(`//button[normalize-space()="Fermer"]`);
+  await waitFor(
+    async () => (await rows()).some((row) => row.Titre === title),
+    "the new title in the list",
+  );
+
+  await menuOnFirstRow();
+  await kanade.click(`//button[normalize-space()="Annuler la dernière modification des tags"]`);
+  await editorTitle("Modification annulée");
+  expect(holds(path, title)).toBe(false);
 });

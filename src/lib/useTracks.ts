@@ -97,7 +97,7 @@ export function useTracks() {
     [refresh],
   );
 
-  return { tracks, error, mark, markError };
+  return { tracks, error, mark, markError, refresh };
 }
 
 /**

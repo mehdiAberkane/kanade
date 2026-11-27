@@ -330,6 +330,30 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   change). Fuzzing : `KANADE_FUZZ_ITERATIONS=20000 cargo test --release --lib fuzzed`
   dans `src-tauri` ; la CI le lance chaque semaine (`fuzz.yml`). Une panique trouvée se
   signale à lofty, et le fichier en cause devient un test.
+- Écriture des tags (KAN-7, `library/tag_write.rs`, `tag_changes.rs`, `tag_journal.rs`,
+  `src/lib/tags.ts`, `TagEditor.tsx`) : « Modifier les tags… » du menu d'un morceau.
+  - Jamais sur place : une copie `.kanade-tags.tmp` dans le dossier du fichier, éditée par
+    lofty bloc par bloc (`SplitTag`/`MergeTag` gardent ce qu'un `Tag` générique ne sait
+    pas tenir), relue et comparée (même audio, autres éléments et pochettes intacts,
+    nouvelles valeurs lues comme Kanade les lit), puis un seul `rename`. Un échec, à
+    n'importe quelle étape, laisse l'original tel quel.
+  - Lecture stricte de lofty : des tags abîmés ne sont pas réécrits (ce que lofty saute
+    serait perdu). Seule exception, un ID3v1 dont l'année est vide (lofty l'écrit en
+    zéros) : le reste du fichier est vérifié strictement sans lui.
+  - Chaque bloc présent (ID3v2, ID3v1, APE…) reçoit les mêmes valeurs, aucun n'est
+    retiré ; le bloc principal est fait depuis les autres s'il manque. MP3 en ID3v2.3.
+    La date de création du fichier est gardée, celle de modification change.
+  - Refusés, et dits dans le compte rendu : lecture seule, seulement sur OneDrive, WMA,
+    fichier changé depuis la lecture de Kanade, ouvert par un autre programme.
+  - Une modification à la fois, fichier par fichier sur le fil de la commande, avec sa
+    progression (`tags-progress`) et un arrêt. Chaque fichier écrit va dans l'index et
+    dans le journal (`tag_changes`, `tag_edits`) d'une seule transaction : la
+    surveillance, qui voit le fichier changer, n'a rien à relire.
+  - « Annuler la dernière modification » remet les valeurs d'avant, sauf sur un champ
+    changé ailleurs depuis. Le journal garde les 100 dernières modifications.
+  - lofty garde ses options par fil : `configure_lofty` les pose sur chaque fil qui lit.
+  - Outils de lot (numéroter, casse…) : KAN-53 ; historique et corrections depuis la
+    Santé : KAN-54 ; pochette : KAN-33.
 - Icône : la source est `app-icon.svg`. Pour la changer, `npm run tauri icon app-icon.svg`,
   puis supprimer `src-tauri/icons/android` et `src-tauri/icons/ios` (app Windows seulement).
   Cargo ne voit pas le changement d'icône : `cargo clean -p kanade` dans `src-tauri` avant
