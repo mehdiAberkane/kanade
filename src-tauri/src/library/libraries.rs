@@ -12,6 +12,7 @@ use std::path::Path;
 use rusqlite::{OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 
+use super::exclusions::{self, Exclusions};
 use super::index::Index;
 use super::paths;
 use super::scan::{LibraryError, ScanError, ScanReport};
@@ -35,6 +36,8 @@ pub struct Library {
     /// to turn off on a slow network drive, which is then scanned every 30
     /// minutes.
     pub watch: bool,
+    /// What its scans leave out (KAN-43).
+    pub exclusions: Exclusions,
 }
 
 /// Characters kept in a library's name.
@@ -184,7 +187,7 @@ impl Index {
     /// Every library, by name.
     pub fn libraries(&self) -> rusqlite::Result<Vec<Library>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, root, added_ms, last_scan, watch FROM libraries \
+            "SELECT id, name, root, added_ms, last_scan, watch, exclusions FROM libraries \
              ORDER BY name COLLATE NOCASE, id",
         )?;
         stmt.query_map([], library_from_row)?.collect()
@@ -193,7 +196,8 @@ impl Index {
     pub fn library(&self, id: LibraryId) -> rusqlite::Result<Option<Library>> {
         self.conn
             .query_row(
-                "SELECT id, name, root, added_ms, last_scan, watch FROM libraries WHERE id = ?1",
+                "SELECT id, name, root, added_ms, last_scan, watch, exclusions FROM libraries \
+                 WHERE id = ?1",
                 [id.0],
                 library_from_row,
             )
@@ -220,6 +224,7 @@ impl Index {
             added_ms: now_ms,
             last_scan: None,
             watch: true,
+            exclusions: Exclusions::default(),
         })
     }
 
@@ -435,6 +440,7 @@ fn library_from_row(r: &Row<'_>) -> rusqlite::Result<Library> {
         // A summary that no longer reads is only not shown.
         last_scan: last_scan.and_then(|json| serde_json::from_str(&json).ok()),
         watch: r.get(5)?,
+        exclusions: exclusions::from_column(r.get(6)?),
     })
 }
 
@@ -965,9 +971,17 @@ mod tests {
                 2,
             )),
             watch: false,
+            exclusions: Exclusions {
+                folders: vec!["Podcasts".into()],
+                extensions: vec!["wav".into()],
+            },
         };
         let json = serde_json::to_value(&library).unwrap();
         assert_eq!(json["id"], 7);
+        assert_eq!(
+            json["exclusions"],
+            serde_json::json!({ "folders": ["Podcasts"], "extensions": ["wav"] })
+        );
         assert_eq!(json["addedMs"], 1);
         assert_eq!(json["watch"], false);
         assert_eq!(json["lastScan"]["endedMs"], 2);

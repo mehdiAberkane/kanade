@@ -170,6 +170,11 @@ impl Scanner {
         self.queue.enqueue(library, read_online_only)
     }
 
+    /// See `ScanQueue::enqueue_folders`.
+    pub fn enqueue_folders(&self, library: LibraryId, folders: Vec<PathBuf>) {
+        self.queue.enqueue_folders(library, folders);
+    }
+
     /// Stops the scan of `library`: out of the queue, or told to stop (it
     /// keeps what it read, see `ScanReport::cancelled`).
     pub fn cancel(&self, library: LibraryId) {
@@ -379,10 +384,12 @@ fn scan(shared: &Shared, index: &mut Index, job: &Job, cancel: &AtomicBool) {
         }
         shared.events.progress(job.library, progress);
     };
+    let excluded = library.exclusions.under(&library.root);
     let mut control = ScanControl {
         read_online_only: job.read_online_only,
         cancel,
         progress: &mut progress,
+        excluded: &excluded,
     };
     let result = scan_folder_with(
         index,
@@ -418,6 +425,7 @@ fn update(
         return false;
     };
     let mut update = WatchUpdate::default();
+    let excluded = library.exclusions.under(&library.root);
     for folder in folders_to_scan(&library.root, folders) {
         if cancel.load(Ordering::Relaxed) {
             break;
@@ -426,6 +434,7 @@ fn update(
             read_online_only: false,
             cancel,
             progress: &mut |_| {},
+            excluded: &excluded,
         };
         // A folder that went away meanwhile: the next update or scan of the
         // folder above it sees it.

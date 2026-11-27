@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use walkdir::WalkDir;
 
+use super::exclusions::Excluded;
 use super::index::{Candidate, Changes, Index, Known, TrackId, TrackStatus};
 use super::paths;
 use super::track::{FileStamp, ReadError, ReadErrorKind, Track, is_audio_file, read_track};
@@ -106,6 +107,9 @@ pub struct ScanControl<'a> {
     /// Called at each folder and each audio file: the caller decides how
     /// often to pass it on.
     pub progress: &'a mut dyn FnMut(&ScanProgress),
+    /// What the library leaves out (KAN-43): not walked, and its tracks
+    /// marked left out rather than missing.
+    pub excluded: &'a Excluded,
 }
 
 /// Errors the interface shows, each with a stable code it translates.
@@ -150,6 +154,11 @@ pub enum LibraryError {
     /// The file chosen to import marks from is not one Kanade or Ongaku
     /// wrote (KAN-32).
     NotMarksFile,
+    /// The folder to leave out is not inside the library `name` (KAN-43):
+    /// elsewhere, or its own folder.
+    NotInLibrary {
+        name: String,
+    },
     /// A file could not be written (the export of the errors).
     Io {
         message: String,
@@ -175,6 +184,9 @@ impl fmt::Display for LibraryError {
             Self::TrackNotFound => f.write_str("no such track"),
             Self::NotAnImage => f.write_str("not a JPEG image Kanade can show"),
             Self::NotMarksFile => f.write_str("not a file of favourites and ratings"),
+            Self::NotInLibrary { name } => {
+                write!(f, "this folder is not inside the library {name}")
+            }
             Self::Io { message } => write!(f, "file error: {message}"),
             Self::Database { message } => write!(f, "library database error: {message}"),
         }
@@ -215,6 +227,7 @@ pub fn scan_folder_at(
         read_online_only: false,
         cancel: &NEVER,
         progress: &mut |_| {},
+        excluded: &Excluded::default(),
     };
     scan_folder_with(index, root, now_ms, &mut control)
 }
@@ -255,7 +268,16 @@ pub fn scan_folder_with(
         progress: ScanProgress::default(),
     };
 
-    for entry in WalkDir::new(root).follow_links(false) {
+    let excluded = control.excluded;
+    // A folder left out is not walked at all; a file left out by its
+    // extension is passed over.
+    let walk = WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| {
+            !(entry.file_type().is_dir() && excluded.folder(&entry.path().to_string_lossy()))
+        });
+    for entry in walk {
         if control.cancel.load(Ordering::Relaxed) {
             scan.report.cancelled = true;
             break;
@@ -264,7 +286,11 @@ pub fn scan_folder_with(
             Ok(entry) if entry.file_type().is_dir() => {
                 scan.progress.folder = entry.path().display().to_string();
             }
-            Ok(entry) if entry.file_type().is_file() && is_audio_file(entry.path()) => {
+            Ok(entry)
+                if entry.file_type().is_file()
+                    && is_audio_file(entry.path())
+                    && !excluded.file(&entry.path().to_string_lossy()) =>
+            {
                 scan.progress.seen += 1;
                 scan.file(index, &entry)?;
             }
@@ -291,7 +317,7 @@ pub fn scan_folder_with(
     // Stopped halfway, the scan has not seen every file: none is taken for
     // gone, and the possible moves wait for the next scan.
     if !scan.report.cancelled {
-        scan.finish(index, root)?;
+        scan.finish(index, root, excluded)?;
     }
     index.apply(&scan.changes)?;
     scan.tell(control);
@@ -336,6 +362,12 @@ impl Scan {
         let key = paths::compare_key(&path);
         self.seen.insert(key.clone());
         let known = self.known.get(&key).cloned();
+        // Walked, so no longer left out: its folder was let back.
+        if let Some(known) = &known
+            && known.excluded_ms.is_some()
+        {
+            self.changes.include.push(known.id);
+        }
 
         let stamp = match entry.metadata() {
             Ok(m) if paths::is_online_only(&m) && !self.read_online_only => {
@@ -435,14 +467,35 @@ impl Scan {
         }
     }
 
-    /// Once the folder is walked: new files that are moved tracks, then the
-    /// tracks whose file is gone.
-    fn finish(&mut self, index: &Index, root: &Path) -> Result<(), LibraryError> {
+    /// Once the folder is walked: the tracks left out by the library, new
+    /// files that are moved tracks, then the tracks whose file is gone.
+    fn finish(
+        &mut self,
+        index: &Index,
+        root: &Path,
+        excluded: &Excluded,
+    ) -> Result<(), LibraryError> {
+        // Left out, a track is hidden, not missing: it comes back with the
+        // folder, unless it stays out for KEEP_GONE_MS.
+        let left_out: Vec<(TrackId, Option<i64>)> = self
+            .known
+            .iter()
+            .filter(|(key, known)| !self.seen.contains(*key) && excluded.file(&known.path))
+            .map(|(_, known)| (known.id, known.excluded_ms))
+            .collect();
+        for (id, since_ms) in left_out {
+            match since_ms {
+                Some(since_ms) => self.expire(id, since_ms),
+                None => self.changes.exclude.push((id, self.now_ms)),
+            }
+        }
+
         let gone: HashMap<String, Known> = self
             .known
             .iter()
             .filter(|(key, known)| {
                 !self.seen.contains(*key)
+                    && !excluded.file(&known.path)
                     && !self
                         .unreadable_dirs
                         .iter()
@@ -612,6 +665,90 @@ mod tests {
             .unwrap();
         assert_eq!(mp3.track.title.as_deref(), Some("Title of tone.mp3"));
         assert_eq!(mp3.status, TrackStatus::Present);
+    }
+
+    /// A scan of `root` leaving out what `exclusions` say (KAN-43).
+    fn scan_leaving_out(
+        index: &mut Index,
+        root: &Path,
+        exclusions: &crate::library::Exclusions,
+        now_ms: i64,
+    ) -> ScanReport {
+        let normalized = paths::normalize_root(root).unwrap();
+        let excluded = exclusions.under(&normalized.to_string_lossy());
+        let never = AtomicBool::new(false);
+        let mut control = ScanControl {
+            read_online_only: false,
+            cancel: &never,
+            progress: &mut |_| {},
+            excluded: &excluded,
+        };
+        scan_folder_with(index, root, now_ms, &mut control).unwrap()
+    }
+
+    fn excluded_since(index: &Index, root: &Path, id: TrackId) -> Option<i64> {
+        index
+            .known_under(&paths::normalize_root(root).unwrap())
+            .unwrap()
+            .into_values()
+            .find(|k| k.id == id)
+            .unwrap()
+            .excluded_ms
+    }
+
+    #[test]
+    fn a_folder_left_out_is_not_walked_its_tracks_hidden_then_gone() {
+        let dir = library();
+        let mut index = Index::open_in_memory().unwrap();
+        scan(&mut index, dir.path());
+        let raw = id_of(&index, &dir.path().join("Untagged").join("raw.flac"));
+        let untagged = crate::library::Exclusions {
+            folders: vec!["Untagged".into()],
+            extensions: Vec::new(),
+        };
+
+        let report = scan_leaving_out(&mut index, dir.path(), &untagged, NOW);
+        assert_eq!((report.missing, report.removed), (0, 0));
+        assert_eq!(report.unchanged, listed());
+        assert_eq!(excluded_since(&index, dir.path(), raw), Some(NOW));
+        // Still left out a day later: kept as it was.
+        scan_leaving_out(&mut index, dir.path(), &untagged, NOW + DAY);
+        assert_eq!(excluded_since(&index, dir.path(), raw), Some(NOW));
+
+        // Let back before KEEP_GONE_MS: walked, shown again, same id.
+        let report = scan(&mut index, dir.path());
+        assert_eq!((report.added, report.moved), (0, 0));
+        assert_eq!(excluded_since(&index, dir.path(), raw), None);
+        assert_eq!(status_of(&index, raw), TrackStatus::Present);
+
+        // Left out for longer: it leaves the index; the file stays.
+        scan_leaving_out(&mut index, dir.path(), &untagged, NOW);
+        let later = NOW + KEEP_GONE_MS + 1;
+        let report = scan_leaving_out(&mut index, dir.path(), &untagged, later);
+        assert_eq!(report.removed, 1);
+        assert!(index.track(raw).unwrap().is_none());
+        assert!(dir.path().join("Untagged").join("raw.flac").exists());
+    }
+
+    #[test]
+    fn a_file_left_out_by_its_extension_is_hidden_and_not_moved() {
+        let dir = library();
+        let mut index = Index::open_in_memory().unwrap();
+        scan(&mut index, dir.path());
+        let wav = id_of(&index, &dir.path().join("tone.wav"));
+        let no_wav = crate::library::Exclusions {
+            folders: Vec::new(),
+            extensions: vec!["wav".into()],
+        };
+        let report = scan_leaving_out(&mut index, dir.path(), &no_wav, NOW);
+        assert_eq!((report.missing, report.unchanged), (0, listed()));
+        assert_eq!(excluded_since(&index, dir.path(), wav), Some(NOW));
+        // A copy under another name, still a WAV, is left out too: the
+        // track is not taken for moved.
+        let copy = dir.path().join("Untagged").join("copie.wav");
+        fs::copy(dir.path().join("tone.wav"), copy).unwrap();
+        let report = scan_leaving_out(&mut index, dir.path(), &no_wav, NOW);
+        assert_eq!((report.added, report.moved), (0, 0));
     }
 
     #[test]
@@ -1193,6 +1330,7 @@ mod tests {
             read_online_only: true,
             cancel: &never,
             progress: &mut |_| {},
+            excluded: &Excluded::default(),
         };
         let report = scan_folder_with(&mut index, dir.path(), NOW, &mut control).unwrap();
         assert_eq!((report.added, report.online_only), (1, 0), "{report:?}");
@@ -1211,6 +1349,7 @@ mod tests {
                 read_online_only: false,
                 cancel: &never,
                 progress: &mut |p| told.push(p.clone()),
+                excluded: &Excluded::default(),
             };
             scan_folder_with(&mut index, dir.path(), NOW, &mut control).unwrap()
         };
@@ -1228,6 +1367,7 @@ mod tests {
             read_online_only: false,
             cancel: &never,
             progress: &mut |p| told.push(p.clone()),
+            excluded: &Excluded::default(),
         };
         scan_folder_with(&mut index, dir.path(), NOW, &mut control).unwrap();
         assert_eq!(told.last().unwrap().removed, 1);
@@ -1266,6 +1406,7 @@ mod tests {
             read_online_only: false,
             cancel: &cancel,
             progress: &mut stop_after_three,
+            excluded: &Excluded::default(),
         };
         let report = scan_folder_with(&mut index, dir.path(), NOW, &mut control).unwrap();
         assert!(report.cancelled);
@@ -1293,6 +1434,7 @@ mod tests {
             read_online_only: false,
             cancel: &cancelled,
             progress: &mut |_| {},
+            excluded: &Excluded::default(),
         };
         let report = scan_folder_with(&mut index, dir.path(), NOW, &mut control).unwrap();
         assert!(report.cancelled);

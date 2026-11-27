@@ -14,7 +14,7 @@ use rusqlite::Connection;
 use super::{StoreError, user_version};
 
 /// The version the steps below lead to.
-pub const LATEST_VERSION: i32 = 7;
+pub const LATEST_VERSION: i32 = 8;
 
 struct Migration {
     version: i32,
@@ -135,6 +135,14 @@ CREATE TABLE settings (
         sql: "
 ALTER TABLE tracks ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE tracks ADD COLUMN rating INTEGER NOT NULL DEFAULT 0;",
+    },
+    // KAN-43: what each library leaves out (the JSON of Exclusions), and
+    // since when a track is left out: hidden, then gone after KEEP_GONE_MS.
+    Migration {
+        version: 8,
+        sql: "
+ALTER TABLE libraries ADD COLUMN exclusions TEXT;
+ALTER TABLE tracks ADD COLUMN excluded_ms INTEGER;",
     },
 ];
 
@@ -321,6 +329,27 @@ mod tests {
             })
             .unwrap();
         assert_eq!((favorite, rating), (false, 0));
+    }
+
+    #[test]
+    fn step_8_leaves_nothing_out_of_the_libraries_before() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate_to(&mut conn, 7).unwrap();
+        conn.execute_batch(
+            "INSERT INTO libraries (name, root, root_key, added_ms)
+             VALUES ('Musique', 'D:\\Musique', 'd:\\musique', 1);
+             INSERT INTO tracks (path, size, modified_ms, format, has_cover)
+             VALUES ('D:\\Musique\\a.flac', 1, 1, 'FLAC', 0);",
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let exclusions: Option<String> = conn
+            .query_row("SELECT exclusions FROM libraries", [], |r| r.get(0))
+            .unwrap();
+        let excluded: Option<i64> = conn
+            .query_row("SELECT excluded_ms FROM tracks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!((exclusions, excluded), (None, None));
     }
 
     #[test]

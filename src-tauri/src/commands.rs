@@ -11,7 +11,7 @@
 // Tauri hands a command its arguments by value, State and window included.
 #![allow(clippy::needless_pass_by_value)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State, WebviewWindow, Window, WindowEvent};
@@ -109,6 +109,8 @@ impl<R: Runtime> ScanEvents for TauriEvents<R> {
 /// The dialogs a command opens; `None` when the user closes them.
 trait Dialogs {
     fn pick_folder(&self, title: &str) -> Option<PathBuf>;
+    /// A folder, the picker opened in `start`.
+    fn pick_subfolder(&self, title: &str, start: &Path) -> Option<PathBuf>;
     fn save_text(&self, title: &str, file_name: &str) -> Option<PathBuf>;
     /// A JSON file to save (`save`) or to open.
     fn json_file(&self, title: &str, save: Option<&str>) -> Option<PathBuf>;
@@ -130,6 +132,21 @@ impl<R: Runtime> Dialogs for WindowDialogs<R> {
     #[cfg(feature = "e2e")]
     fn pick_folder(&self, _: &str) -> Option<PathBuf> {
         crate::e2e::picked_folder()
+    }
+
+    #[cfg(not(feature = "e2e"))]
+    fn pick_subfolder(&self, title: &str, start: &Path) -> Option<PathBuf> {
+        rfd::FileDialog::new()
+            .set_title(title)
+            .set_directory(start)
+            .set_parent(&self.0)
+            .pick_folder()
+    }
+
+    /// The end-to-end test build opens no dialog: nothing chosen.
+    #[cfg(feature = "e2e")]
+    fn pick_subfolder(&self, _: &str, _: &Path) -> Option<PathBuf> {
+        None
     }
 
     fn save_text(&self, title: &str, file_name: &str) -> Option<PathBuf> {
@@ -171,6 +188,22 @@ fn relocate(
         return Ok(None);
     };
     service.relocate(id, &folder).map(Some)
+}
+
+/// Asks which folder of the library to leave out (KAN-43), the picker
+/// opened in the library's own.
+fn exclude_folder(
+    libraries: &Libraries,
+    dialogs: &impl Dialogs,
+    id: LibraryId,
+) -> Result<Option<Library>, LibraryError> {
+    let service = libraries.get()?;
+    let library = service.library(id)?;
+    let title = format!("Dossier à exclure de « {} »", library.name);
+    let Some(folder) = dialogs.pick_subfolder(&title, Path::new(&library.root)) else {
+        return Ok(None);
+    };
+    service.exclude_folder(id, &folder).map(Some)
 }
 
 fn export_errors(
@@ -284,6 +317,47 @@ pub fn library_cancel_scan(
 ) -> Result<(), LibraryError> {
     libraries.get()?.cancel_scan(id);
     Ok(())
+}
+
+/// Asks which of its folders the library leaves out (KAN-43): its tracks
+/// are hidden at once. `None` when the user closed the picker.
+#[tauri::command(async)]
+pub fn library_exclude_folder<R: Runtime>(
+    id: LibraryId,
+    window: WebviewWindow<R>,
+    libraries: State<'_, Libraries>,
+) -> Result<Option<Library>, LibraryError> {
+    exclude_folder(&libraries, &WindowDialogs(window), id)
+}
+
+/// Lets back a folder the library leaves out, named as the library lists
+/// it: only one of its own, never a new path.
+#[tauri::command(async)]
+pub fn library_include_folder(
+    id: LibraryId,
+    folder: String,
+    libraries: State<'_, Libraries>,
+) -> Result<Library, LibraryError> {
+    libraries.get()?.include_folder(id, &folder)
+}
+
+/// The extensions the library leaves out, among the ones Kanade reads.
+#[tauri::command(async)]
+pub fn library_set_excluded_extensions(
+    id: LibraryId,
+    extensions: Vec<String>,
+    libraries: State<'_, Libraries>,
+) -> Result<Library, LibraryError> {
+    libraries.get()?.set_excluded_extensions(id, extensions)
+}
+
+/// Leaves out the folder of a track, from the list's menu.
+#[tauri::command(async)]
+pub fn track_exclude_folder(
+    id: TrackId,
+    libraries: State<'_, Libraries>,
+) -> Result<Library, LibraryError> {
+    libraries.get()?.exclude_track_folder(id)
 }
 
 /// Asks where the library's folder now is; `None` when the user closed the
@@ -545,6 +619,9 @@ mod tests {
         fn pick_folder(&self, _: &str) -> Option<PathBuf> {
             self.0.clone()
         }
+        fn pick_subfolder(&self, _: &str, _: &Path) -> Option<PathBuf> {
+            self.0.clone()
+        }
         fn save_text(&self, _: &str, _: &str) -> Option<PathBuf> {
             self.0.clone()
         }
@@ -586,6 +663,42 @@ mod tests {
         let none = Libraries(None);
         assert!(export_marks(&none, &Answer(None)).is_err());
         assert!(import_marks(&none, &Answer(None)).is_err());
+    }
+
+    /// A folder left out from the picker (KAN-43): its tracks are hidden;
+    /// one outside the library is refused, a closed picker does nothing.
+    #[test]
+    fn a_picked_folder_is_left_out_of_its_library() {
+        let dir = tempfile::tempdir().unwrap();
+        let music = dir.path().join("Musique");
+        let podcasts = music.join("Podcasts");
+        fs::create_dir_all(&podcasts).unwrap();
+        crate::library::track::tests::tagged_copy("tone.mp3", &music.join("a.mp3"), "Un");
+        crate::library::track::tests::tagged_copy("tone.mp3", &podcasts.join("b.mp3"), "Deux");
+        let libraries = libraries(dir.path());
+        let library = add(&libraries, &Answer(Some(music.clone())))
+            .unwrap()
+            .unwrap();
+        libraries.get().unwrap().wait_idle();
+        assert_eq!(libraries.get().unwrap().tracks().unwrap().len(), 2);
+
+        assert_eq!(
+            exclude_folder(&libraries, &Answer(None), library.id).unwrap(),
+            None
+        );
+        assert_eq!(
+            exclude_folder(&libraries, &Answer(Some(music)), library.id).unwrap_err(),
+            LibraryError::NotInLibrary {
+                name: "Musique".into()
+            }
+        );
+        let left = exclude_folder(&libraries, &Answer(Some(podcasts)), library.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(left.exclusions.folders, vec!["Podcasts"]);
+        let service = libraries.get().unwrap();
+        assert_eq!(service.tracks().unwrap().len(), 1);
+        assert!(exclude_folder(&Libraries(None), &Answer(None), library.id).is_err());
     }
 
     fn libraries(dir: &Path) -> Libraries {
@@ -879,6 +992,9 @@ mod tests {
                 health_ignored_set,
                 tracks_without_folder_cover,
                 tracks_mark,
+                library_include_folder,
+                library_set_excluded_extensions,
+                track_exclude_folder,
             ])
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap();
@@ -1066,6 +1182,34 @@ mod tests {
             .unwrap(),
             0
         );
+        // KAN-43: what the library leaves out.
+        let wav = invoke(
+            &webview,
+            "library_set_excluded_extensions",
+            serde_json::json!({ "id": id, "extensions": ["WAV", "exe"] }),
+        )
+        .unwrap();
+        assert_eq!(
+            wav["exclusions"],
+            serde_json::json!({ "folders": [], "extensions": ["wav"] })
+        );
+        let same = invoke(
+            &webview,
+            "library_include_folder",
+            serde_json::json!({ "id": id, "folder": r"..\Windows" }),
+        )
+        .unwrap();
+        assert_eq!(same["exclusions"], wav["exclusions"]);
+        assert_eq!(
+            invoke(
+                &webview,
+                "track_exclude_folder",
+                serde_json::json!({ "id": 9999 })
+            )
+            .unwrap_err(),
+            serde_json::json!({ "code": "track_not_found" })
+        );
+        wait_idle();
         assert_eq!(
             invoke(
                 &webview,

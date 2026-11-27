@@ -23,7 +23,7 @@ use lofty::tag::{ItemKey, Tag};
 use serde::Serialize;
 
 /// Extensions of the audio files Kanade lists, in lower case.
-const AUDIO_EXTENSIONS: &[&str] = &[
+pub(super) const AUDIO_EXTENSIONS: &[&str] = &[
     "mp3", "flac", "m4a", "m4b", "mp4", "aac", "ogg", "oga", "opus", "wav", "aif", "aiff", "wv",
     "ape", "mpc", "spx", "wma",
 ];
@@ -168,7 +168,7 @@ impl fmt::Display for ReadError {
     }
 }
 
-fn extension(path: &Path) -> Option<String> {
+pub(super) fn extension(path: &Path) -> Option<String> {
     path.extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
 }

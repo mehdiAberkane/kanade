@@ -25,6 +25,7 @@ use std::time::{Duration, Instant};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher as _};
 use serde::Serialize;
 
+use super::exclusions::Excluded;
 use super::libraries::{Library, LibraryId};
 use super::paths;
 use super::scanner::ScanQueue;
@@ -99,6 +100,8 @@ struct Watched {
     root: String,
     wanted: bool,
     state: WatchState,
+    /// What the library leaves out (KAN-43): its changes are ignored.
+    excluded: Excluded,
 }
 
 struct State {
@@ -165,13 +168,15 @@ impl Watcher {
             libraries: watched,
         } = &mut *state;
         watched.retain(|id, old| {
-            let kept = libraries.iter().any(|l| {
+            let kept = libraries.iter().find(|l| {
                 l.id == *id && l.watch == old.wanted && paths::same_path(&l.root, &old.root)
             });
-            if !kept && old.state == WatchState::Watching {
+            if let Some(library) = kept {
+                old.excluded = library.exclusions.under(&library.root);
+            } else if old.state == WatchState::Watching {
                 unwatch(notify, &old.root);
             }
-            kept
+            kept.is_some()
         });
         for library in libraries {
             watched.entry(library.id).or_insert_with(|| Watched {
@@ -182,6 +187,7 @@ impl Watcher {
                 } else {
                     WatchState::Off
                 },
+                excluded: library.exclusions.under(&library.root),
             });
         }
     }
@@ -236,13 +242,15 @@ fn unwatch(notify: &mut Result<RecommendedWatcher, String>, root: &str) {
     }
 }
 
-/// The library whose watched folder holds `path`.
+/// The library whose watched folder holds `path`, unless it leaves the
+/// path out (KAN-43).
 fn library_of(state: &State, path: &Path) -> Option<LibraryId> {
     let path = plain(path);
     state
         .libraries
         .iter()
         .find(|(_, w)| w.state == WatchState::Watching && paths::is_under(&path, &w.root))
+        .filter(|(_, w)| !w.excluded.file(&path))
         .map(|(id, _)| *id)
 }
 
@@ -460,6 +468,7 @@ mod tests {
             added_ms: 1,
             last_scan: None,
             watch,
+            exclusions: crate::library::Exclusions::default(),
         }
     }
 
@@ -499,6 +508,41 @@ mod tests {
             paths
                 .iter()
                 .all(|p| !p.to_string_lossy().starts_with("\\\\?\\"))
+        );
+    }
+
+    /// KAN-43: what a library leaves out is not looked at, even when its
+    /// exclusions change while it is watched.
+    #[test]
+    fn changes_in_what_a_library_leaves_out_are_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let music = root(&dir, "Musique");
+        let podcasts = music.join("Podcasts");
+        fs::create_dir(&podcasts).unwrap();
+        let sink = Sink::default();
+        let watcher = Watcher::start(sink.clone(), FAST);
+        watcher.set_libraries(&[library(1, &music, true)]);
+        let mut leaving_out = library(1, &music, true);
+        leaving_out.exclusions = crate::library::Exclusions {
+            folders: vec!["Podcasts".into()],
+            extensions: vec!["wav".into()],
+        };
+        watcher.set_libraries(&[leaving_out]);
+
+        fs::write(podcasts.join("épisode.mp3"), b"not really audio").unwrap();
+        fs::write(music.join("démo.wav"), b"not really audio").unwrap();
+        fs::write(music.join("titre.mp3"), b"not really audio").unwrap();
+        let calls = sink.wait(|c| !c.is_empty());
+        thread::sleep(FAST.quiet * 3);
+        let Call::Folders(_, paths) = &calls[0] else {
+            panic!("{calls:?}");
+        };
+        assert!(paths.iter().any(|p| p.ends_with("titre.mp3")), "{paths:?}");
+        assert!(
+            paths
+                .iter()
+                .all(|p| !p.ends_with("démo.wav") && !p.to_string_lossy().contains("Podcasts")),
+            "{paths:?}"
         );
     }
 
