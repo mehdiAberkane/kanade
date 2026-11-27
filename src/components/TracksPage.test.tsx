@@ -58,6 +58,13 @@ function row(fields: {
   ];
 }
 
+/** `r` moved into `folder`, under its library's folder (KAN-43). */
+function inFolder(r: TrackRow, folder: string): TrackRow {
+  const moved: TrackRow = [...r];
+  moved[4] = r[4].replace(/\\([^\\]+)$/, `\\${folder}\\$1`);
+  return moved;
+}
+
 const SAMPLE = (): TrackRow[] => [
   row({ title: "Yesterday", artist: "The Beatles", album: "Help!", track: 13, year: 1965 }),
   row({
@@ -771,6 +778,55 @@ describe("Track menu", () => {
       target: app.screen.getAllByRole("columnheader")[0],
     });
     expect(app.screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("leaves out the folder of a track once asked, not its library's own (KAN-43)", async () => {
+    const { calls } = backend({
+      tracks: [
+        inFolder(row({ title: "Yesterday", artist: "The Beatles" }), String.raw`The Beatles\Help!`),
+        row({ title: "Racine" }),
+      ],
+      overrides: { track_exclude_folder: () => null },
+    });
+    const app = await renderApp();
+    await grid(app);
+    const rowOf = (title: string) => app.screen.getByRole("row", { name: new RegExp(title) });
+    await app.user.pointer({ keys: "[MouseRight]", target: rowOf("Racine") });
+    expect(app.screen.queryByRole("menuitem", { name: /^Exclure le dossier/ })).toBeNull();
+    await app.user.keyboard("{Escape}");
+
+    await app.user.pointer({ keys: "[MouseRight]", target: rowOf("Yesterday") });
+    // Not at the root: the track's folder.
+    const item = app.screen.getByRole("menuitem", { name: "Exclure le dossier « Help! »…" });
+    await app.user.click(item);
+    expect(app.screen.getByText("Exclure le dossier « Help! » ?")).toBeTruthy();
+    expect(document.activeElement?.textContent).toBe("Annuler");
+    await app.user.click(app.screen.getByRole("menuitem", { name: "Annuler" }));
+    expect(app.screen.getByRole("menuitem", { name: "Copier le chemin" })).toBeTruthy();
+
+    await app.user.click(app.screen.getByRole("menuitem", { name: /^Exclure le dossier/ }));
+    await app.user.click(app.screen.getByRole("menuitem", { name: "Exclure" }));
+    expect(app.screen.queryByRole("menu")).toBeNull();
+    const yesterday = calls.find((c) => c.cmd === "track_exclude_folder");
+    expect(yesterday?.args).toEqual({ id: Number(rowOf("Yesterday").id.replace("track-", "")) });
+  });
+
+  it("says why a folder could not be left out", async () => {
+    backend({
+      tracks: [inFolder(row({ title: "Andy" }), "Rita")],
+      overrides: { track_exclude_folder: refuse({ code: "track_not_found" }) },
+    });
+    const app = await renderApp();
+    await grid(app);
+    await app.user.pointer({
+      keys: "[MouseRight]",
+      target: app.screen.getByRole("row", { name: /Andy/ }),
+    });
+    await app.user.click(app.screen.getByRole("menuitem", { name: /^Exclure le dossier/ }));
+    await app.user.click(app.screen.getByRole("menuitem", { name: "Exclure" }));
+    expect((await app.screen.findByRole("alert")).textContent).toBe(
+      "Ce morceau n'est plus dans Kanade.",
+    );
   });
 
   it("says why a track cannot be shown or copied", async () => {

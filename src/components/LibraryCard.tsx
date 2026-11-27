@@ -11,6 +11,8 @@ import {
   watchLine,
   type LibraryView,
 } from "../lib/libraries";
+import { exclusionCount } from "../lib/exclusions";
+import { LibraryExclusions } from "./LibraryExclusions";
 import { ScanErrorsPanel } from "./ScanErrorsPanel";
 
 const BADGES = {
@@ -20,7 +22,7 @@ const BADGES = {
   idle: null,
 } as const;
 
-type Mode = "view" | "rename" | "remove" | "errors";
+type Mode = "view" | "rename" | "remove" | "errors" | "exclusions";
 
 /** One library: where its scan stands, and what can be done with it. */
 export function LibraryCard({ library }: { library: LibraryView }) {
@@ -45,6 +47,7 @@ export function LibraryCard({ library }: { library: LibraryView }) {
   const online = onlineOnlyLine(library.lastScan);
   const errors = library.lastScan?.errors ?? 0;
   const badge = BADGES[state];
+  const excluded = exclusionCount(library.exclusions);
 
   return (
     <article className={`library-card state-${state}`} aria-labelledby={titleId}>
@@ -141,6 +144,15 @@ export function LibraryCard({ library }: { library: LibraryView }) {
           )}
           <button
             className="btn"
+            aria-expanded={mode === "exclusions"}
+            onClick={() => {
+              setMode(mode === "exclusions" ? "view" : "exclusions");
+            }}
+          >
+            {excluded > 0 ? `Exclusions (${String(excluded)})` : "Exclusions"}
+          </button>
+          <button
+            className="btn"
             onClick={() => {
               setMode("rename");
             }}
@@ -159,6 +171,7 @@ export function LibraryCard({ library }: { library: LibraryView }) {
       )}
 
       {mode === "errors" && <ScanErrorsPanel library={library} />}
+      {mode === "exclusions" && <LibraryExclusions library={library} run={run} />}
       {failure && (
         <p className="status status-error" role="alert">
           {failure}

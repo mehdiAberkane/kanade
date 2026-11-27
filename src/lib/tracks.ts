@@ -163,6 +163,8 @@ type ColumnId =
 /** What a column needs from outside the track: the libraries' names. */
 export interface Context {
   libraryNames: Map<number, string>;
+  /** Their folders: the track menu offers to leave out a sub-folder (KAN-43). */
+  libraryRoots?: Map<number, string>;
 }
 
 interface Column {

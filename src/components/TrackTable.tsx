@@ -452,6 +452,7 @@ export function TrackTable({
           y={menu.y}
           tracks={menu.tracks}
           focus={menu.focus}
+          root={context.libraryRoots?.get(menu.focus.libraryId)}
           onClose={() => {
             setMenu(null);
             scroller.current?.focus();

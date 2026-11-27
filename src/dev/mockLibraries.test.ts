@@ -227,6 +227,49 @@ describe("fake tracks", () => {
     ]);
   });
 
+  it("leaves folders and extensions out, hiding their tracks (KAN-43)", async () => {
+    setup();
+    const all = await invoke<TrackRow[]>("tracks_list");
+    const musique = async () => (await byName("Musique")) as LibraryView;
+    const before = (await musique()).tracks;
+    // The fake picker: the folder of the library's first artist.
+    const artist = (all.find((r) => r[1] === 1) as TrackRow)[4].split("\\")[2];
+    const left = await invoke<LibraryView>("library_exclude_folder", { id: 1 });
+    expect(left.exclusions.folders).toEqual([artist]);
+    const shown = await invoke<TrackRow[]>("tracks_list");
+    expect(shown.length).toBeLessThan(all.length);
+    expect(shown.some((r) => r[1] === 1 && r[4].includes(`\\${artist}\\`))).toBe(false);
+    expect((await musique()).tracks).toBeLessThan(before);
+
+    const second = await invoke<LibraryView>("library_exclude_folder", { id: 1 });
+    expect(second.exclusions.folders).toHaveLength(2);
+    const back = await invoke<LibraryView>("library_include_folder", {
+      id: 1,
+      folder: artist.toUpperCase(),
+    });
+    expect(back.exclusions.folders).toHaveLength(1);
+    expect(back.exclusions.folders).not.toContain(artist);
+    await invoke("library_include_folder", { id: 1 });
+
+    const flac = await invoke<LibraryView>("library_set_excluded_extensions", {
+      id: 1,
+      extensions: ["FLAC", "exe", "flac"],
+    });
+    expect(flac.exclusions.extensions).toEqual(["flac"]);
+    expect(
+      (await invoke<TrackRow[]>("tracks_list")).some((r) => r[1] === 1 && r[4].endsWith(".flac")),
+    ).toBe(false);
+    await invoke("library_set_excluded_extensions", { id: 1 });
+
+    // From a track: its folder; one at the root of its library is refused.
+    const track = all.find((r) => r[1] === 2) as TrackRow;
+    const fromTrack = await invoke<LibraryView>("track_exclude_folder", { id: track[0] });
+    expect(fromTrack.exclusions.folders).toHaveLength(1);
+    await expect(invoke("track_exclude_folder", { id: -1 })).rejects.toEqual({
+      code: "track_not_found",
+    });
+  });
+
   it("shows a known track, refuses an unknown one", async () => {
     setup();
     const [first] = await invoke<number[][]>("tracks_list");

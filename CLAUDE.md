@@ -153,6 +153,14 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   - **L'interface ne donne jamais de chemin** : un dossier vient du sélecteur ouvert côté
     Rust (`rfd`, dans `commands.rs`) ou d'un glisser-déposer, que Windows remet au Rust.
     Les commandes prennent l'identifiant de la bibliothèque.
+  - Exclusions (KAN-43, `library/exclusions.rs`, `src/lib/exclusions.ts`) : par
+    bibliothèque, des sous-dossiers (gardés relatifs à la racine) et des extensions,
+    dans la colonne `exclusions` de `libraries`. Le scan ne les parcourt pas, la
+    surveillance les ignore. Leurs morceaux sont cachés tout de suite (`excluded_ms`),
+    gardés `KEEP_GONE_MS`, puis sortent de l'index. Une exclusion retirée les remet,
+    même identifiant, favoris et notes. Pour retirer un dossier, l'interface renvoie le
+    nom que Rust a listé, jamais un nouveau chemin. La liste des extensions existe des
+    deux côtés : un test Rust vérifie qu'elles restent pareilles.
   - Les scans tournent sur un fil à part (`library/scanner.rs`), un à la fois, avec
     progression (événements Tauri) et annulation. Retirer ou déplacer une bibliothèque
     passe par `Scanner::without_scan_of`, pour qu'aucun scan ne réécrive ses morceaux.
