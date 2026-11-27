@@ -170,13 +170,33 @@ fn values(tag: &Tag, key: Key) -> Vec<String> {
 pub trait Change {
     /// The items to set in a file whose tags read `current`: only the ones
     /// that differ.
-    fn values(&self, current: &Tag) -> Values;
+    fn values(&self, current: &Tag) -> Result<Values, Refusal>;
 }
 
-/// Values found before a change, written back to undo it.
-impl Change for Values {
-    fn values(&self, current: &Tag) -> Values {
-        self.clone().differing(current)
+impl<T: Change + ?Sized> Change for &T {
+    fn values(&self, current: &Tag) -> Result<Values, Refusal> {
+        (**self).values(current)
+    }
+}
+
+/// A change undone: the values found before written back, when the file
+/// still has the ones written. A field changed since (by another program)
+/// is not overwritten: the file is left as it is. A file already undone
+/// (an undo stopped half way, then asked again) is left too.
+#[derive(Debug, Clone, Copy)]
+pub struct Undo<'a> {
+    pub before: &'a Values,
+    pub after: &'a Values,
+}
+
+impl Change for Undo<'_> {
+    fn values(&self, current: &Tag) -> Result<Values, Refusal> {
+        let undo = self.before.clone().differing(current);
+        if undo.is_empty() || self.after.clone().differing(current).is_empty() {
+            Ok(undo)
+        } else {
+            Err(Refusal::Changed)
+        }
     }
 }
 
@@ -224,7 +244,7 @@ fn checked(field: TagField, raw: &str) -> Result<Option<String>, LibraryError> {
 }
 
 impl Change for TagEdit {
-    fn values(&self, current: &Tag) -> Values {
+    fn values(&self, current: &Tag) -> Result<Values, Refusal> {
         let mut values = Values::default();
         for (field, value) in &self.0 {
             let number = value.as_deref().and_then(|v| v.parse::<u32>().ok());
@@ -244,7 +264,7 @@ impl Change for TagEdit {
                 }
             }
         }
-        values.differing(current)
+        Ok(values.differing(current))
     }
 }
 
@@ -310,7 +330,7 @@ pub fn write(
     track::configure_lofty();
     let (before, mode) = read_tagged(&io_path, file_type)?;
     let current = text_of(&before);
-    let values = change.values(&current);
+    let values = change.values(&current)?;
     if values.is_empty() {
         return Ok(None);
     }

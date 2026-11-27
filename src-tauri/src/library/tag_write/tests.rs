@@ -405,8 +405,14 @@ fn puts_back_the_values_found_before() {
                 (Number, "9"),
             ]),
         );
-        let undone = written(&path, &done.before);
+        let undo = Undo {
+            before: &done.before,
+            after: &done.after,
+        };
+        let undone = written(&path, &undo);
         assert_eq!(undone.before, done.after, "{name}");
+        // Undone twice: nothing more to do.
+        assert_eq!(write(&path, stamp_of(&path), &undo), Ok(None), "{name}");
         let after = read(&path).unwrap();
         assert_eq!(
             (
@@ -723,4 +729,21 @@ fn says_why_lofty_could_not_read_a_file() {
             message: "why".to_owned()
         }
     );
+}
+
+#[test]
+fn does_not_undo_a_field_changed_since() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = copy_in(dir.path(), "tone.flac");
+    let done = written(&path, &edit(&[(Title, "Mine"), (Artist, "Me")]));
+    // Another program changed the title meanwhile.
+    with_tag(&path, |tag| tag.set_title("Theirs".to_owned()));
+    let undo = Undo {
+        before: &done.before,
+        after: &done.after,
+    };
+    let stamp = stamp_of(&path);
+    assert_eq!(write(&path, stamp, &undo), Err(Refusal::Changed));
+    assert_eq!(read(&path).unwrap().title.as_deref(), Some("Theirs"));
+    assert_eq!(stamp_of(&path), stamp);
 }

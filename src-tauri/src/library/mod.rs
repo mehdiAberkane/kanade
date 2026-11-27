@@ -15,6 +15,8 @@ pub mod playback;
 pub mod scan;
 pub mod scanner;
 pub mod service;
+pub mod tag_changes;
+pub mod tag_journal;
 pub mod tag_write;
 pub mod track;
 pub mod watcher;

@@ -330,7 +330,10 @@ fn insert_tracks(tx: &Transaction<'_>, tracks: &[Track], added_ms: i64) -> rusql
 }
 
 /// New path and tags for existing tracks, which become present again.
-fn update_tracks(tx: &Transaction<'_>, updates: &[(TrackId, Track)]) -> rusqlite::Result<()> {
+pub(super) fn update_tracks(
+    tx: &Transaction<'_>,
+    updates: &[(TrackId, Track)],
+) -> rusqlite::Result<()> {
     let mut update = tx.prepare(
         "UPDATE tracks SET path = ?1, size = ?2, modified_ms = ?3, format = ?4, title = ?5, \
          artist = ?6, album_artist = ?7, album = ?8, track_number = ?9, disc_number = ?10, \
