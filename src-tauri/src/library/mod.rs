@@ -4,6 +4,7 @@
 
 pub mod appearance;
 pub mod covers;
+pub mod exclusions;
 pub mod health;
 pub mod index;
 pub mod libraries;
@@ -18,6 +19,7 @@ pub mod watcher;
 
 pub use appearance::{Appearance, Neon};
 pub use covers::{CoverSize, CoverSource};
+pub use exclusions::{Excluded, Exclusions};
 pub use index::{Index, IndexedTrack, TrackId, TrackStatus};
 pub use libraries::{LastScan, Library, LibraryId, ScanOutcome, Settings, TooBroad};
 pub use listing::{AlbumView, RevealTarget, TrackRow, TrackView};

@@ -16,10 +16,12 @@ use serde::Serialize;
 
 use super::appearance::Appearance;
 use super::covers::{self, CoverSize};
+use super::exclusions::{self, Exclusions};
 use super::index::{Index, TrackId};
 use super::libraries::{Library, LibraryId, Settings, TooBroad};
 use super::listing::{AlbumView, RevealTarget, TrackRow, TrackView};
 use super::marks;
+use super::paths;
 use super::scan::{LibraryError, ScanError};
 use super::scanner::{ScanEvents, ScanState, Scanner};
 use super::watcher::{Timing, WatchState, Watcher};
@@ -227,6 +229,123 @@ impl LibraryService {
             self.scanner.enqueue(id, false);
         }
         self.scanner.changed();
+        Ok(library)
+    }
+
+    pub fn library(&self, id: LibraryId) -> Result<Library, LibraryError> {
+        self.index().library(id)?.ok_or(LibraryError::NotFound)
+    }
+
+    /// Changes what the library leaves out (KAN-43), once no scan of it
+    /// runs: a scan stopped for it is queued again, under the new rules.
+    /// Returns what it left out before, and the library.
+    fn change_exclusions(
+        &self,
+        id: LibraryId,
+        change: impl FnOnce(&Library) -> Result<Exclusions, LibraryError>,
+    ) -> Result<(Exclusions, Library), LibraryError> {
+        let busy = self.scanner.state_of(id) != ScanState::Idle;
+        let (before, library) = self.scanner.without_scan_of(id, || {
+            let mut index = self.index();
+            let library = index.library(id)?.ok_or(LibraryError::NotFound)?;
+            let exclusions = change(&library)?;
+            let changed = index.set_exclusions(id, exclusions, store::now_ms())?;
+            Ok::<_, LibraryError>((library.exclusions, changed))
+        })?;
+        self.rewatch();
+        if busy {
+            self.scanner.enqueue(id, false);
+        }
+        self.scanner.changed();
+        Ok((before, library))
+    }
+
+    /// Leaves `folder` out of the library: its tracks hidden at once, kept a
+    /// while in case it is let back. It must be inside the library's folder.
+    pub fn exclude_folder(&self, id: LibraryId, folder: &Path) -> Result<Library, LibraryError> {
+        let folder = paths::normalize_root(folder).map_err(|e| LibraryError::RootUnavailable {
+            root: folder.display().to_string(),
+            message: e.to_string(),
+        })?;
+        self.exclude_sub_folder(id, &folder.to_string_lossy())
+    }
+
+    /// `exclude_folder`, for a folder already in its reference form.
+    fn exclude_sub_folder(&self, id: LibraryId, folder: &str) -> Result<Library, LibraryError> {
+        let (_, library) = self.change_exclusions(id, |library| {
+            let sub = exclusions::sub_path(folder, &library.root).ok_or_else(|| {
+                LibraryError::NotInLibrary {
+                    name: library.name.clone(),
+                }
+            })?;
+            Ok(library.exclusions.with_folder(sub))
+        })?;
+        Ok(library)
+    }
+
+    /// Leaves out the folder of the track `track`, in its library.
+    pub fn exclude_track_folder(&self, track: TrackId) -> Result<Library, LibraryError> {
+        let (library, folder) = {
+            let index = self.index();
+            let path = index
+                .track(track)?
+                .ok_or(LibraryError::TrackNotFound)?
+                .track
+                .path;
+            let library = index
+                .libraries()?
+                .into_iter()
+                .find(|l| paths::is_under(&path, &l.root))
+                .ok_or(LibraryError::TrackNotFound)?;
+            let folder = Path::new(&path)
+                .parent()
+                .map_or_else(String::new, |p| p.to_string_lossy().into_owned());
+            (library.id, folder)
+        };
+        // As the index keeps it: already in its reference form.
+        self.exclude_sub_folder(library, &folder)
+    }
+
+    /// Lets back `folder`, as the library lists it: its tracks shown again,
+    /// and the folder read for what changed meanwhile. Nothing for a folder
+    /// the library does not leave out.
+    pub fn include_folder(&self, id: LibraryId, folder: &str) -> Result<Library, LibraryError> {
+        let (before, library) =
+            self.change_exclusions(id, |library| Ok(library.exclusions.without_folder(folder)))?;
+        // Only a folder the library listed: never a path from elsewhere.
+        let let_back: Vec<PathBuf> = before
+            .folders
+            .iter()
+            .filter(|kept| !library.exclusions.folders.contains(kept))
+            .map(|kept| Path::new(&library.root).join(kept))
+            .collect();
+        if !let_back.is_empty() {
+            self.scanner.enqueue_folders(id, let_back);
+        }
+        Ok(library)
+    }
+
+    /// The extensions the library leaves out, among the ones Kanade reads;
+    /// one let back has the whole folder read again for its files.
+    pub fn set_excluded_extensions(
+        &self,
+        id: LibraryId,
+        extensions: Vec<String>,
+    ) -> Result<Library, LibraryError> {
+        let (before, library) = self.change_exclusions(id, |library| {
+            Ok(Exclusions {
+                folders: library.exclusions.folders.clone(),
+                extensions,
+            })
+        })?;
+        if before
+            .extensions
+            .iter()
+            .any(|e| !library.exclusions.extensions.contains(e))
+        {
+            self.scanner
+                .enqueue_folders(id, vec![PathBuf::from(&library.root)]);
+        }
         Ok(library)
     }
 
@@ -826,6 +945,129 @@ mod tests {
             .unwrap();
         assert!(moved.4.contains("Rangé"), "{}", moved.4);
         assert_eq!((moved.21, moved.22), (true, 5));
+    }
+
+    /// KAN-43: a folder left out hides its tracks at once; let back, they
+    /// return with their ids and marks. An extension works the same way.
+    #[test]
+    fn a_folder_left_out_hides_its_tracks_until_it_is_let_back() {
+        let s = setup();
+        let root = music(&s, "Musique");
+        let podcasts = root.join("Podcasts");
+        fs::create_dir(&podcasts).unwrap();
+        tagged_copy("tone.mp3", &podcasts.join("épisode.mp3"), "Épisode");
+        let library = s.service.add(&root).unwrap();
+        s.service.wait_idle();
+        let episode = s
+            .service
+            .tracks()
+            .unwrap()
+            .into_iter()
+            .find(|r| r.4.contains("Podcasts"))
+            .unwrap();
+        s.service
+            .mark(&[TrackId(episode.0)], Some(true), None)
+            .unwrap();
+
+        let left = s.service.exclude_folder(library.id, &podcasts).unwrap();
+        assert_eq!(left.exclusions.folders, vec!["Podcasts"]);
+        let shown = |s: &Setup| s.service.tracks().unwrap();
+        assert_eq!(shown(&s).len(), FIXTURES.len());
+        assert_eq!(s.service.list().unwrap()[0].tracks, FIXTURES.len());
+        // A scan neither walks it nor takes its track for missing.
+        s.service.scan(library.id, false).unwrap();
+        s.service.wait_idle();
+        assert_eq!(shown(&s).len(), FIXTURES.len());
+        let last = s.service.list().unwrap()[0].library.last_scan.clone();
+        assert_eq!(last.unwrap().missing, 0);
+
+        // Not a folder of the library, or one gone: refused, as an unknown
+        // library is.
+        assert_eq!(
+            s.service.exclude_folder(library.id, &root).unwrap_err(),
+            LibraryError::NotInLibrary {
+                name: "Musique".into()
+            }
+        );
+        assert!(matches!(
+            s.service
+                .exclude_folder(library.id, &root.join("Absent"))
+                .unwrap_err(),
+            LibraryError::RootUnavailable { .. }
+        ));
+        assert_eq!(
+            s.service
+                .exclude_folder(LibraryId(99), &podcasts)
+                .unwrap_err(),
+            LibraryError::NotFound
+        );
+
+        let back = s.service.include_folder(library.id, "podcasts").unwrap();
+        assert!(back.exclusions.folders.is_empty());
+        s.service.wait_idle();
+        let again = shown(&s);
+        let found = again.iter().find(|r| r.0 == episode.0).unwrap();
+        assert_eq!((found.21, again.len()), (true, FIXTURES.len() + 1));
+        // A folder it does not leave out: nothing to do.
+        assert_eq!(s.service.include_folder(library.id, "Autre").unwrap(), back);
+
+        // By extension, then back.
+        let wav = s
+            .service
+            .set_excluded_extensions(library.id, vec!["WAV".into()])
+            .unwrap();
+        assert_eq!(wav.exclusions.extensions, vec!["wav"]);
+        assert!(shown(&s).iter().all(|r| !r.4.ends_with(".wav")));
+        s.service
+            .set_excluded_extensions(library.id, Vec::new())
+            .unwrap();
+        s.service.wait_idle();
+        assert_eq!(shown(&s).len(), FIXTURES.len() + 1);
+    }
+
+    /// From the list's menu: the folder of a track; one at the root of its
+    /// library cannot be, and a track unknown is refused.
+    #[test]
+    fn the_folder_of_a_track_is_left_out_from_the_list() {
+        let s = setup();
+        let root = music(&s, "Musique");
+        let album = root.join("Album");
+        fs::create_dir(&album).unwrap();
+        tagged_copy("tone.flac", &album.join("01.flac"), "Un");
+        s.service.add(&root).unwrap();
+        s.service.wait_idle();
+        let rows = s.service.tracks().unwrap();
+        let in_album = rows.iter().find(|r| r.4.contains("Album")).unwrap();
+        let at_root = rows.iter().find(|r| !r.4.contains("Album")).unwrap();
+
+        assert!(matches!(
+            s.service.exclude_track_folder(TrackId(at_root.0)),
+            Err(LibraryError::NotInLibrary { .. })
+        ));
+        let left = s.service.exclude_track_folder(TrackId(in_album.0)).unwrap();
+        assert_eq!(left.exclusions.folders, vec!["Album"]);
+        assert_eq!(s.service.tracks().unwrap().len(), FIXTURES.len());
+        assert_eq!(
+            s.service.exclude_track_folder(TrackId(9999)).unwrap_err(),
+            LibraryError::TrackNotFound
+        );
+    }
+
+    /// A scan running while a folder is left out is stopped, then queued
+    /// again under the new rules.
+    #[test]
+    fn a_scan_stopped_by_an_exclusion_is_queued_again() {
+        let s = setup();
+        let root = music(&s, "Musique");
+        let podcasts = root.join("Podcasts");
+        fs::create_dir(&podcasts).unwrap();
+        let library = s.service.add(&root).unwrap();
+        s.service.wait_idle();
+        s.service.scan(library.id, false).unwrap();
+        s.service.exclude_folder(library.id, &podcasts).unwrap();
+        s.service.wait_idle();
+        let last = s.service.list().unwrap()[0].library.last_scan.clone();
+        assert_eq!(last.unwrap().outcome, crate::library::ScanOutcome::Done);
     }
 
     #[test]

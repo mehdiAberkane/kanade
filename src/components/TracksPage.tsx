@@ -64,21 +64,19 @@ export function TracksPage({ onManage }: { onManage: () => void }) {
 
   // The names change seldom, the libraries' state four times a second
   // during a scan: the sort follows the names only.
-  const names = (libraries ?? []).map((l) => `${l.id}\u0000${l.name}`).join("\u0001");
-  const context = useMemo<Context>(
-    () => ({
-      libraryNames: new Map(
-        names
-          .split("\u0001")
-          .filter(Boolean)
-          .map((entry) => {
-            const [id, name] = entry.split("\u0000");
-            return [Number(id), name];
-          }),
-      ),
-    }),
-    [names],
-  );
+  const names = (libraries ?? [])
+    .map((l) => `${l.id}\u0000${l.name}\u0000${l.root}`)
+    .join("\u0001");
+  const context = useMemo<Context>(() => {
+    const entries = names
+      .split("\u0001")
+      .filter(Boolean)
+      .map((entry) => entry.split("\u0000"));
+    return {
+      libraryNames: new Map(entries.map(([id, name]) => [Number(id), name])),
+      libraryRoots: new Map(entries.map(([id, , root]) => [Number(id), root])),
+    };
+  }, [names]);
   // A library removed while shown: back to all of them.
   const library = libraries?.find((l) => l.id === chosen) ?? null;
   const libraryId = library?.id ?? null;

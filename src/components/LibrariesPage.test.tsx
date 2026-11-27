@@ -286,6 +286,63 @@ describe("Library card", () => {
     expect(app.screen.getAllByRole("article")).toHaveLength(2);
   });
 
+  it("leaves folders and extensions out, and lets them back (KAN-43)", async () => {
+    const { calls } = backend();
+    const app = await renderApp();
+    const musique = await card(app, "Musique");
+    const open = musique.getByRole("button", { name: "Exclusions" });
+    await app.user.click(open);
+    expect(open.getAttribute("aria-expanded")).toBe("true");
+    expect(musique.getByText("Aucun dossier exclu.")).toBeTruthy();
+    const count = () => musique.getByText(/^[\d\s]+ morceaux$/).textContent;
+    const before = count();
+
+    // The fake picker: the folder of the library's first artist.
+    await app.user.click(musique.getByRole("button", { name: "Exclure un dossier…" }));
+    const folders = await musique.findByRole("list", { name: "Dossiers exclus" });
+    const artist = String(
+      app.within(folders).getByRole("listitem").querySelector(".folder")?.textContent,
+    );
+    expect(musique.getByRole("button", { name: "Exclusions (1)" })).toBeTruthy();
+    // Fewer tracks on the card: the artist's are hidden.
+    expect(count()).not.toBe(before);
+
+    await app.user.click(musique.getByRole("checkbox", { name: ".wav" }));
+    await app.waitFor(() => {
+      expect(musique.getByRole<HTMLInputElement>("checkbox", { name: ".wav" }).checked).toBe(true);
+    });
+    await app.user.click(musique.getByRole("checkbox", { name: ".wav" }));
+    await app.user.click(musique.getByRole("button", { name: `Ne plus exclure ${artist}` }));
+    expect(await musique.findByText("Aucun dossier exclu.")).toBeTruthy();
+    expect(calls.map((c) => c.cmd)).toEqual(
+      expect.arrayContaining([
+        "library_exclude_folder",
+        "library_set_excluded_extensions",
+        "library_include_folder",
+      ]),
+    );
+    expect(calls.find((c) => c.cmd === "library_include_folder")?.args).toEqual({
+      id: 1,
+      folder: artist,
+    });
+
+    await app.user.click(musique.getByRole("button", { name: "Exclusions" }));
+    expect(musique.queryByRole("heading", { name: "Exclusions" })).toBeNull();
+  });
+
+  it("says why a folder cannot be left out", async () => {
+    backend("sample", {
+      library_exclude_folder: refuse({ code: "not_in_library", name: "Musique" }),
+    });
+    const app = await renderApp();
+    const musique = await card(app, "Musique");
+    await app.user.click(musique.getByRole("button", { name: "Exclusions" }));
+    await app.user.click(musique.getByRole("button", { name: "Exclure un dossier…" }));
+    expect((await musique.findByRole("alert")).textContent).toBe(
+      "Ce dossier n'est pas dans la bibliothèque « Musique » : choisis un de ses sous-dossiers.",
+    );
+  });
+
   it("says when a command fails", async () => {
     backend("sample", { library_scan: refuse({ code: "not_found" }) });
     const app = await renderApp();
@@ -375,6 +432,7 @@ describe("Drop on the window", () => {
           addedMs: 0,
           lastScan: null,
           watch: true,
+          exclusions: { folders: [], extensions: [] },
         },
       ],
       refused: [

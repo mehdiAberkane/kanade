@@ -15,6 +15,7 @@ import {
   type Settings,
 } from "../lib/libraries";
 import type { AlbumView } from "../lib/albums";
+import { AUDIO_EXTENSIONS, folderUnder, leftOut, type Exclusions } from "../lib/exclusions";
 import type { Mark } from "../lib/marks";
 import type { TrackRow, TrackView } from "../lib/tracks";
 import { mockTracks } from "./mockTracks";
@@ -113,6 +114,7 @@ function sample(now: number): Entry[] {
         scan: { state: "idle" },
         watch: true,
         watcher: { state: "watching" },
+        exclusions: { folders: [], extensions: [] },
         lastScan: lastScan(
           now - 2 * DAY_MS,
           { kind: "done" },
@@ -158,6 +160,7 @@ function sample(now: number): Entry[] {
         // Turned off by the user: a synced folder that changes all day.
         watch: false,
         watcher: { state: "off" },
+        exclusions: { folders: [], extensions: [] },
         lastScan: lastScan(now - DAY_MS, { kind: "done" }, { unchanged: 845, onlineOnly: 37 }),
       },
       files: 845,
@@ -175,6 +178,7 @@ function sample(now: number): Entry[] {
         scan: { state: "idle" },
         watch: true,
         watcher: { state: "failed", reason: UNPLUGGED },
+        exclusions: { folders: [], extensions: [] },
         lastScan: lastScan(now - 3 * DAY_MS, { kind: "unavailable", message: OFFLINE }),
       },
       files: 3_210,
@@ -292,16 +296,27 @@ export function createMockLibraries({
   }
   /** The favourites and ratings changed (KAN-32), by track id. */
   const marks = new Map<unknown, { favorite: boolean; rating: number }>();
-  /** The rows as the list gets them: with the marks changed since. */
+  /** The rows of a library its exclusions leave out (KAN-43). */
+  function hidden(entry: Entry): TrackRow[] {
+    const { exclusions, root } = entry.view;
+    if (exclusions.folders.length + exclusions.extensions.length === 0) return [];
+    return tracksOf(entry).filter((row) => leftOut(row[4], root, exclusions));
+  }
+  /** The rows as the list gets them: none left out, the marks changed since. */
   function listed(): TrackRow[] {
-    return entries.flatMap(tracksOf).map((row) => {
-      const mark = marks.get(row[0]);
-      if (!mark) return row;
-      const copy: TrackRow = [...row];
-      copy[21] = mark.favorite;
-      copy[22] = mark.rating;
-      return copy;
-    });
+    return entries
+      .flatMap((entry) => {
+        const out = new Set(hidden(entry));
+        return out.size === 0 ? tracksOf(entry) : tracksOf(entry).filter((row) => !out.has(row));
+      })
+      .map((row) => {
+        const mark = marks.get(row[0]);
+        if (!mark) return row;
+        const copy: TrackRow = [...row];
+        copy[21] = mark.favorite;
+        copy[22] = mark.rating;
+        return copy;
+      });
   }
   /** What tracks_mark does: the ids known marked, a field left out kept. */
   function mark({ ids = [], favorite = null, rating = null }: MarkArgs): number {
@@ -426,6 +441,7 @@ export function createMockLibraries({
         lastScan: null,
         watch: true,
         watcher: { state: "watching" },
+        exclusions: { folders: [], extensions: [] },
       },
       files: 1_240,
       online: 0,
@@ -448,10 +464,13 @@ export function createMockLibraries({
     };
     switch (cmd) {
       case "libraries_list":
-        // By name, as the Rust side lists them.
+        // By name, as the Rust side lists them; the tracks left out not counted.
         return structuredClone(
           entries
-            .map((e) => e.view)
+            .map((e) => ({
+              ...e.view,
+              tracks: e.view.tracks - Math.round(hidden(e).length / trackScale),
+            }))
             .sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" })),
         );
       case "library_add":
@@ -468,6 +487,14 @@ export function createMockLibraries({
         return listed();
       case "tracks_mark":
         return mark(args as MarkArgs);
+      case "track_exclude_folder": {
+        const row = rowById(idOf(args));
+        const entry = entries.find((e) => e.view.id === row?.[1]);
+        if (!row || !entry) return refuse({ code: "track_not_found" });
+        const folder = folderUnder(row[4], entry.view.root);
+        if (folder === null) return refuse({ code: "not_in_library", name: entry.view.name });
+        return exclude(entry, { folders: [...entry.view.exclusions.folders, folder] });
+      }
       case "marks_export":
         // The save dialog: saved, with the tracks marked.
         return { tracks: listed().filter((row) => row[21] || row[22] > 0).length };
@@ -570,9 +597,46 @@ export function createMockLibraries({
       case "library_export_errors":
         // The save dialog: saved.
         return true;
+      case "library_exclude_folder": {
+        // The picker: the folder of the first artist not left out yet.
+        const { folders } = entry.view.exclusions;
+        const next = tracksOf(entry)
+          .map((row) => row[4].slice(entry.view.root.length + 1).split("\\")[0])
+          .filter((folder) => folder && !folders.includes(folder))
+          .slice(0, 1);
+        return exclude(entry, { folders: [...folders, ...next] });
+      }
+      case "library_include_folder": {
+        const folder = (args as { folder?: string }).folder ?? "";
+        return exclude(entry, {
+          folders: entry.view.exclusions.folders.filter(
+            (f) => f.toLowerCase() !== folder.toLowerCase(),
+          ),
+        });
+      }
+      case "library_set_excluded_extensions": {
+        const asked = (args as { extensions?: string[] }).extensions ?? [];
+        // Made safe as the Rust side does: known ones, once each, sorted.
+        const known: readonly string[] = AUDIO_EXTENSIONS;
+        const extensions = [...new Set(asked.map((e) => e.toLowerCase()))]
+          .filter((e) => known.includes(e))
+          .sort();
+        return exclude(entry, { extensions });
+      }
       default:
         return NOT_MINE;
     }
+  }
+
+  /** What `entry` leaves out, changed as `change` says; the lists told. */
+  function exclude(entry: Entry, change: Partial<Exclusions>) {
+    entry.view.exclusions = {
+      ...entry.view.exclusions,
+      ...change,
+      folders: [...new Set(change.folders ?? entry.view.exclusions.folders)].sort(),
+    };
+    changed();
+    return structuredClone(entry.view);
   }
 
   /** How the folder is watched, as the Rust side says it. */

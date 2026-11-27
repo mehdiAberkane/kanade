@@ -183,7 +183,8 @@ impl Index {
         let mut stmt = self.conn.prepare(
             "SELECT id, status, status_since_ms, path, title, artist, album_artist, album, \
              track_number, disc_number, year, genre, format, duration_ms, bitrate_kbps, size, \
-             added_ms, modified_ms, has_cover, favorite, rating FROM tracks",
+             added_ms, modified_ms, has_cover, favorite, rating FROM tracks \
+             WHERE excluded_ms IS NULL",
         )?;
         let mut rows = stmt.query([])?;
         let mut list = Vec::new();

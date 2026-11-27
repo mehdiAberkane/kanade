@@ -42,6 +42,7 @@ function view(fields: Partial<LibraryView> = {}): LibraryView {
     root: String.raw`D:\Musique`,
     addedMs: 0,
     lastScan: null,
+    exclusions: { folders: [], extensions: [] },
     tracks: 0,
     scan: { state: "idle" },
     watch: true,
@@ -84,6 +85,10 @@ describe("errorText", () => {
       { code: "not_marks_file" },
       "Ce fichier ne contient pas de favoris ni de notes : choisis un fichier exporté par " +
         "Kanade, ou une sauvegarde d'Ongaku.",
+    ],
+    [
+      { code: "not_in_library", name: "M" },
+      "Ce dossier n'est pas dans la bibliothèque « M » : choisis un de ses sous-dossiers.",
     ],
     [{ code: "io", message: "denied" }, "Erreur de fichier : denied"],
     [{ code: "database", message: "locked" }, "Erreur de la base de Kanade : locked"],
@@ -189,7 +194,17 @@ describe("dropLines", () => {
   it("names each library added, and each path refused once", () => {
     expect(
       dropLines({
-        added: [{ id: 1, name: "Jazz", root: "D:\\Jazz", addedMs: 0, lastScan: null, watch: true }],
+        added: [
+          {
+            id: 1,
+            name: "Jazz",
+            root: "D:\\Jazz",
+            addedMs: 0,
+            lastScan: null,
+            watch: true,
+            exclusions: { folders: [], extensions: [] },
+          },
+        ],
         refused: [
           { path: "C:\\", error: { code: "too_broad", root: "C:\\" } },
           { path: "D:\\Musique\\Rock", error: { code: "inside_library", name: "Musique" } },

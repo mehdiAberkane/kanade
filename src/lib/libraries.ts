@@ -1,5 +1,6 @@
 // The libraries (Rust: library::LibraryView and the commands of
 // commands.rs) and what the interface says about them.
+import type { Exclusions } from "./exclusions";
 
 export interface ScanProgress {
   /** Audio files met so far. */
@@ -48,6 +49,8 @@ export interface Library {
   lastScan: LastScan | null;
   /** Its folder is watched while Kanade is open (KAN-27). */
   watch: boolean;
+  /** What its scans leave out (KAN-43). */
+  exclusions: Exclusions;
 }
 
 /** How a library's folder is watched (Rust: library::WatchState). */
@@ -77,6 +80,7 @@ export type LibraryError =
   | { code: "track_not_found" }
   | { code: "not_an_image" }
   | { code: "not_marks_file" }
+  | { code: "not_in_library"; name: string }
   | { code: "io"; message: string }
   | { code: "database"; message: string };
 
@@ -190,6 +194,8 @@ export function errorText(error: unknown): string {
         "Ce fichier ne contient pas de favoris ni de notes : choisis un fichier exporté par " +
         "Kanade, ou une sauvegarde d'Ongaku."
       );
+    case "not_in_library":
+      return `Ce dossier n'est pas dans la bibliothèque « ${error.name} » : choisis un de ses sous-dossiers.`;
     case "io":
       // Written (an export) or read (an import).
       return `Erreur de fichier : ${error.message}`;

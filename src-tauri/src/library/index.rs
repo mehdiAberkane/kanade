@@ -62,6 +62,9 @@ pub struct Known {
     pub path: String,
     pub stamp: FileStamp,
     pub status: TrackStatus,
+    /// Since when the track is left out by its library (KAN-43): hidden,
+    /// and gone from the index after `KEEP_GONE_MS`.
+    pub excluded_ms: Option<i64>,
 }
 
 /// An indexed track with the same content as a file being scanned.
@@ -89,6 +92,10 @@ pub struct Changes {
     /// it changes once more.
     pub restamp: Vec<(TrackId, FileStamp)>,
     pub remove: Vec<TrackId>,
+    /// Tracks left out by their library, since when (KAN-43).
+    pub exclude: Vec<(TrackId, i64)>,
+    /// Tracks seen again in a folder no longer left out.
+    pub include: Vec<TrackId>,
     /// When the new tracks were found: their date added, which a move or
     /// a new reading of the file does not change.
     pub added_ms: i64,
@@ -102,6 +109,8 @@ impl Changes {
             + self.mark.len()
             + self.restamp.len()
             + self.remove.len()
+            + self.exclude.len()
+            + self.include.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -115,6 +124,8 @@ impl Changes {
         self.mark.clear();
         self.restamp.clear();
         self.remove.clear();
+        self.exclude.clear();
+        self.include.clear();
     }
 }
 
@@ -143,7 +154,7 @@ impl Index {
         let root = root.to_string_lossy();
         let mut stmt = self.conn.prepare(
             "SELECT id, path, size, modified_ms, status, status_since_ms, status_reason, \
-             status_kind FROM tracks WHERE path LIKE ?1 ESCAPE '!'",
+             status_kind, excluded_ms FROM tracks WHERE path LIKE ?1 ESCAPE '!'",
         )?;
         let rows = stmt.query_map([paths::like_under(&root)], |r| {
             Ok(Known {
@@ -154,6 +165,7 @@ impl Index {
                     modified_ms: r.get(3)?,
                 },
                 status: status_from_row(r, 4)?,
+                excluded_ms: r.get(8)?,
             })
         })?;
         let mut known = HashMap::new();
@@ -234,6 +246,15 @@ impl Index {
                 restamp.execute(params![id.0, size_column(stamp.size), stamp.modified_ms])?;
             }
         }
+        {
+            let mut excluded = tx.prepare("UPDATE tracks SET excluded_ms = ?2 WHERE id = ?1")?;
+            for (id, since_ms) in &changes.exclude {
+                excluded.execute(params![id.0, since_ms])?;
+            }
+            for id in &changes.include {
+                excluded.execute(params![id.0, None::<i64>])?;
+            }
+        }
         tx.commit()
     }
 
@@ -271,11 +292,12 @@ impl Index {
         stmt.query_map([], indexed_from_row)?.collect()
     }
 
-    /// How many tracks are under `root`, as `known_under` sees it.
+    /// How many tracks are under `root`, as `known_under` sees it, but
+    /// the ones left out by their library (KAN-43).
     pub fn count_under(&self, root: &str) -> rusqlite::Result<usize> {
-        let mut stmt = self
-            .conn
-            .prepare_cached("SELECT path FROM tracks WHERE path LIKE ?1 ESCAPE '!'")?;
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT path FROM tracks WHERE path LIKE ?1 ESCAPE '!' AND excluded_ms IS NULL",
+        )?;
         let mut rows = stmt.query([paths::like_under(root)])?;
         let mut count = 0;
         while let Some(row) = rows.next()? {
@@ -313,8 +335,8 @@ fn update_tracks(tx: &Transaction<'_>, updates: &[(TrackId, Track)]) -> rusqlite
         "UPDATE tracks SET path = ?1, size = ?2, modified_ms = ?3, format = ?4, title = ?5, \
          artist = ?6, album_artist = ?7, album = ?8, track_number = ?9, disc_number = ?10, \
          year = ?11, genre = ?12, duration_ms = ?13, bitrate_kbps = ?14, has_cover = ?15, \
-         status = 'present', status_since_ms = NULL, status_reason = NULL, status_kind = NULL \
-         WHERE id = ?16",
+         status = 'present', status_since_ms = NULL, status_reason = NULL, status_kind = NULL, \
+         excluded_ms = NULL WHERE id = ?16",
     )?;
     for (id, t) in updates {
         let mut values = file_values(t);
