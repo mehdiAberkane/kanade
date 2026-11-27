@@ -65,6 +65,10 @@ pub struct TrackRow(
     pub bool,
     /// No title tag: the title shown is the file's name (KAN-28, « Sans titre »).
     pub bool,
+    /// The user's favourite (KAN-32).
+    pub bool,
+    /// The user's rating, 0 to 5 stars, 0 for none (KAN-32).
+    pub u8,
 );
 
 /// Where « Afficher dans l'Explorateur » goes: the file, selected, or its
@@ -179,7 +183,7 @@ impl Index {
         let mut stmt = self.conn.prepare(
             "SELECT id, status, status_since_ms, path, title, artist, album_artist, album, \
              track_number, disc_number, year, genre, format, duration_ms, bitrate_kbps, size, \
-             added_ms, modified_ms, has_cover FROM tracks",
+             added_ms, modified_ms, has_cover, favorite, rating FROM tracks",
         )?;
         let mut rows = stmt.query([])?;
         let mut list = Vec::new();
@@ -227,6 +231,8 @@ impl Index {
                 r.get(17)?,
                 r.get(18)?,
                 untitled,
+                r.get(19)?,
+                r.get(20)?,
             ));
         }
         Ok(list)
@@ -395,9 +401,14 @@ mod tests {
         let json = serde_json::to_value(mp3).unwrap();
         assert_eq!(json[0], mp3.0);
         assert_eq!(json[5], "Title of tone.mp3");
-        assert_eq!(json.as_array().unwrap().len(), 21);
+        assert_eq!(json.as_array().unwrap().len(), 23);
         assert_eq!(json[19], true);
         assert_eq!(json[20], false);
+        // No favourite, no rating until the user gives them (KAN-32).
+        assert_eq!(
+            (json[21].clone(), json[22].clone()),
+            (false.into(), 0.into())
+        );
     }
 
     #[test]
