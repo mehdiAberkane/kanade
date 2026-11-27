@@ -207,6 +207,26 @@ describe("fake tracks", () => {
     expect(rows.some((r) => String(r[8]).includes("Vol."))).toBe(true);
   });
 
+  it("marks the tracks known, a field left out kept, and lists them marked", async () => {
+    setup();
+    const [a, b] = await invoke<TrackRow[]>("tracks_list");
+    expect(await invoke("tracks_mark", { ids: [a[0], b[0], -1], favorite: true })).toBe(2);
+    expect(await invoke("tracks_mark", { ids: [a[0]], favorite: null, rating: 9 })).toBe(1);
+    expect(await invoke("tracks_mark", {})).toBe(0);
+    const [a2, b2] = await invoke<TrackRow[]>("tracks_list");
+    expect([a2[21], a2[22]]).toEqual([true, 5]);
+    expect([b2[21], b2[22]]).toEqual([true, b[22]]);
+    const marked = (await invoke<TrackRow[]>("tracks_list")).filter((r) => r[21] || r[22] > 0);
+    expect(await invoke("marks_export")).toEqual({ tracks: marked.length });
+    const file = await invoke<{ title: string; rating: number }[]>("marks_import");
+    expect(file.map((m) => m.title)).toEqual([
+      a[5],
+      b[5],
+      expect.any(String),
+      "Un morceau d'un autre PC",
+    ]);
+  });
+
   it("shows a known track, refuses an unknown one", async () => {
     setup();
     const [first] = await invoke<number[][]>("tracks_list");

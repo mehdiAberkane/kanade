@@ -65,6 +65,15 @@ export class Session {
     await command(`${this.url}/element/${element[ELEMENT]}/click`, "POST", {});
   }
 
+  /** Types `text` into the first element the XPath finds, as the keyboard would. */
+  async type(xpath, text) {
+    const element = await command(`${this.url}/element`, "POST", {
+      using: "xpath",
+      value: xpath,
+    });
+    await command(`${this.url}/element/${element[ELEMENT]}/value`, "POST", { text });
+  }
+
   /** What the window shows, as a PNG. */
   async screenshot() {
     return Buffer.from(await command(`${this.url}/screenshot`, "GET"), "base64");

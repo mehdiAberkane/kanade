@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { cardState, formatNumber, type Settings } from "../lib/libraries";
+import { MarksContext } from "../lib/marks";
 import {
   filterCount,
   matcher,
@@ -36,7 +37,7 @@ const TAB_LABELS: Record<Tab, string> = {
 export function TracksPage({ onManage }: { onManage: () => void }) {
   const [tab, setTab] = useState<Tab>("tracks");
   const { libraries } = useLibraries();
-  const { tracks, error } = useTracks();
+  const { tracks, error, mark, markError } = useTracks();
   const news = useWatchNews();
   const { view, update } = useTrackView();
   const { add, adding, refusal } = useAddLibrary();
@@ -280,6 +281,11 @@ export function TracksPage({ onManage }: { onManage: () => void }) {
             Impossible de lire les morceaux : {error}
           </p>
         )}
+        {markError && (
+          <p className="status status-error" role="alert">
+            Favori ou note non enregistré : {markError}
+          </p>
+        )}
         {refusal && (
           <p className="status status-error" role="alert">
             {refusal}
@@ -291,7 +297,7 @@ export function TracksPage({ onManage }: { onManage: () => void }) {
           </p>
         )}
         <div className="view-panel" id="view-panel" role="tabpanel" aria-labelledby={`tab-${tab}`}>
-          {main}
+          <MarksContext.Provider value={mark}>{main}</MarksContext.Provider>
         </div>
       </section>
     </div>

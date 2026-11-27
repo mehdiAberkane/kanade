@@ -19,6 +19,7 @@ use super::covers::{self, CoverSize};
 use super::index::{Index, TrackId};
 use super::libraries::{Library, LibraryId, Settings, TooBroad};
 use super::listing::{AlbumView, RevealTarget, TrackRow, TrackView};
+use super::marks;
 use super::scan::{LibraryError, ScanError};
 use super::scanner::{ScanEvents, ScanState, Scanner};
 use super::watcher::{Timing, WatchState, Watcher};
@@ -304,6 +305,26 @@ impl LibraryService {
         fs::write(to, text).map_err(|e| LibraryError::Io {
             message: e.to_string(),
         })
+    }
+
+    /// Sets the favourite, the rating, or both, of these tracks (KAN-32).
+    pub fn mark(
+        &self,
+        ids: &[TrackId],
+        favorite: Option<bool>,
+        rating: Option<u8>,
+    ) -> Result<usize, LibraryError> {
+        Ok(self.index().mark_tracks(ids, favorite, rating)?)
+    }
+
+    /// Writes the favourites and ratings to `to`, in the exchange file.
+    pub fn export_marks(&self, to: &Path) -> Result<usize, LibraryError> {
+        let marked = self.index().marked_tracks()?;
+        let count = marked.len();
+        fs::write(to, marks::to_file(marked)).map_err(|e| LibraryError::Io {
+            message: e.to_string(),
+        })?;
+        Ok(count)
     }
 
     /// Every track of every library, for the list (listing.rs).
@@ -776,6 +797,35 @@ mod tests {
         assert!(ids(&album).is_empty());
         let moved = &events.updates.lock().unwrap()[1].1;
         assert_eq!((moved.added, moved.updated), (0, 200));
+    }
+
+    /// KAN-32: a favourite and a rating stay with the track when its file
+    /// is renamed and moved to another folder.
+    #[test]
+    fn marks_follow_a_file_renamed_and_moved() {
+        let s = setup();
+        let root = music(&s, "Musique");
+        let library = s.service.add(&root).unwrap();
+        s.service.wait_idle();
+        let row = s.service.tracks().unwrap()[0].clone();
+        s.service
+            .mark(&[TrackId(row.0)], Some(true), Some(5))
+            .unwrap();
+        let elsewhere = Path::new(&library.root).join("Rangé");
+        fs::create_dir(&elsewhere).unwrap();
+        let extension = Path::new(&row.4).extension().unwrap().to_string_lossy();
+        fs::rename(&row.4, elsewhere.join(format!("renommé.{extension}"))).unwrap();
+        s.service.scan(library.id, false).unwrap();
+        s.service.wait_idle();
+        let moved = s
+            .service
+            .tracks()
+            .unwrap()
+            .into_iter()
+            .find(|r| r.0 == row.0)
+            .unwrap();
+        assert!(moved.4.contains("Rangé"), "{}", moved.4);
+        assert_eq!((moved.21, moved.22), (true, 5));
     }
 
     #[test]

@@ -300,6 +300,39 @@ describe("Settings › Mises à jour", () => {
   });
 });
 
+describe("Favourites and ratings in a file", () => {
+  it("exports them, and imports a file, saying what was found", async () => {
+    const { calls } = backend();
+    const { screen, user } = await openSettings();
+    await user.click(screen.getByRole("button", { name: "Exporter…" }));
+    expect(await screen.findByText(/morceaux enregistrés dans le fichier\.$/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Importer…" }));
+    expect(
+      await screen.findByText("3 morceaux retrouvés sur 4 ; 1 introuvable dans tes bibliothèques."),
+    ).toBeTruthy();
+    expect(calls.filter((c) => c === "tracks_mark")).toHaveLength(4);
+  });
+
+  it("says nothing when the dialog is closed, and why a file is refused", async () => {
+    let refused = false;
+    backend("none", VERSION, "ready", {
+      marks_export: () => null,
+      marks_import: () =>
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+        refused ? Promise.reject({ code: "not_marks_file" }) : null,
+    });
+    const { screen, user } = await openSettings();
+    await user.click(screen.getByRole("button", { name: "Exporter…" }));
+    await user.click(screen.getByRole("button", { name: "Importer…" }));
+    const section = screen.getByRole("heading", { name: "Favoris et notes" })
+      .parentElement as HTMLElement;
+    expect(section.querySelector("[role=status]")).toBeNull();
+    refused = true;
+    await user.click(screen.getByRole("button", { name: "Importer…" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/^Ce fichier ne contient pas/);
+  });
+});
+
 describe("Database banner", () => {
   it("stays hidden when the database opened normally", async () => {
     const { calls } = backend();

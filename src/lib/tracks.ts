@@ -27,6 +27,8 @@ export type TrackRow = [
   modifiedMs: number,
   hasCover: boolean,
   untitled: boolean,
+  favorite: boolean,
+  rating: number,
 ];
 
 type TrackStatus = "present" | "unreadable" | "missing";
@@ -56,6 +58,10 @@ export interface Track {
   hasCover: boolean;
   /** No title tag: `title` is the file's name. */
   untitled: boolean;
+  /** The user's favourite (KAN-32). */
+  favorite: boolean;
+  /** The user's rating, 0 to 5 stars, 0 for none. */
+  rating: number;
 }
 
 const STATUSES: TrackStatus[] = ["present", "unreadable", "missing"];
@@ -83,6 +89,8 @@ export function fromRow(row: TrackRow): Track {
     modifiedMs: row[18],
     hasCover: row[19],
     untitled: row[20],
+    favorite: row[21],
+    rating: row[22],
   };
 }
 
@@ -148,7 +156,9 @@ type ColumnId =
   | "added"
   | "modified"
   | "path"
-  | "library";
+  | "library"
+  | "favorite"
+  | "rating";
 
 /** What a column needs from outside the track: the libraries' names. */
 export interface Context {
@@ -183,6 +193,15 @@ function column(
 
 export const COLUMNS: Column[] = [
   column("title", "Titre", 280, "articles", (t) => t.title),
+  // KAN-32: drawn as buttons by the list; unmarked tracks sort last.
+  column(
+    "favorite",
+    "Favori",
+    64,
+    "number",
+    (t) => (t.favorite ? 1 : null),
+    (t) => (t.favorite ? "♥" : ""),
+  ),
   column("artist", "Artiste", 200, "articles", (t) => t.artist),
   column("albumArtist", "Artiste de l'album", 200, "articles", (t) => t.albumArtist),
   column("album", "Album", 220, "album", (t) => t.album),
@@ -198,6 +217,14 @@ export const COLUMNS: Column[] = [
   ),
   column("year", "Année", 64, "number", (t) => t.year),
   column("genre", "Genre", 140, "text", (t) => t.genre),
+  column(
+    "rating",
+    "Note",
+    100,
+    "number",
+    (t) => t.rating || null,
+    (t) => "★".repeat(t.rating),
+  ),
   column("format", "Format", 90, "text", (t) => t.format),
   column(
     "bitrate",
@@ -244,12 +271,14 @@ export function columnById(id: string): Column | undefined {
 /** The columns shown at first: the ones of the ticket. */
 const DEFAULT_SHOWN = new Set<ColumnId>([
   "title",
+  "favorite",
   "artist",
   "album",
   "track",
   "duration",
   "year",
   "genre",
+  "rating",
   "format",
 ]);
 
@@ -282,19 +311,23 @@ export function defaultView(): TrackView {
 }
 
 /**
- * A kept layout made whole: columns this version does not know dropped,
- * new ones added at the end, hidden; the title always shown.
+ * A kept layout made whole: columns this version does not know dropped;
+ * new ones (the favourite and the rating, KAN-32) put back after the
+ * column they follow by default, shown if they are by default; the title
+ * always shown.
  */
 export function completeView(view: TrackView | null): TrackView {
   if (!view) return defaultView();
   const known = view.columns.filter((c) => BY_ID.has(c.id as ColumnId));
   const listed = new Set(known.map((c) => c.id));
-  const added = COLUMNS.filter((c) => !listed.has(c.id)).map((c) => ({
-    id: c.id,
-    width: c.width,
-    visible: false,
-  }));
-  const columns = [...known, ...added].map((c) => (c.id === "title" ? { ...c, visible: true } : c));
+  const whole = [...known];
+  COLUMNS.forEach((c, i) => {
+    if (listed.has(c.id)) return;
+    // The one before is there by now: kept, or put back just before.
+    const after = i === 0 ? -1 : whole.findIndex((k) => k.id === COLUMNS[i - 1].id);
+    whole.splice(after + 1, 0, { id: c.id, width: c.width, visible: DEFAULT_SHOWN.has(c.id) });
+  });
+  const columns = whole.map((c) => (c.id === "title" ? { ...c, visible: true } : c));
   const sort = view.sort && BY_ID.has(view.sort.column as ColumnId) ? view.sort : null;
   return { columns, sort };
 }

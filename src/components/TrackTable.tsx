@@ -18,6 +18,7 @@ import {
 } from "../lib/tracks";
 import { ColumnsMenu } from "./ColumnsMenu";
 import { TrackMenu } from "./TrackMenu";
+import { MAX_RATING, ratingText, useMarks, type Marker } from "../lib/marks";
 import { useRowHeight } from "../lib/useAppearance";
 
 /** Every row has this height: the table draws only the rows on screen. */
@@ -29,6 +30,85 @@ const TYPE_AHEAD_MS = 1000;
 const RESIZE_STEP = 16;
 
 const FLAGS = { present: null, missing: "introuvable", unreadable: "illisible" } as const;
+
+/** The heart and the stars are centred; numbers to the right. */
+function cellClass(column: { id: string; numeric: boolean }): string | undefined {
+  if (column.id === "favorite" || column.id === "rating") return "mark-cell";
+  return column.numeric ? "num" : undefined;
+}
+
+/** Keys that rate the selected tracks (KAN-32): 0 takes the rating away. */
+const RATING_KEY = /^[0-5]$/;
+
+/**
+ * The heart and the stars of a row. Clicked with the mouse, they leave the
+ * keyboard to the list (the 0 to 5 keys, the menu) and the selection as it
+ * is.
+ */
+function MarkButton({
+  label,
+  on,
+  onPress,
+  children,
+}: {
+  label: string;
+  on: boolean;
+  onPress: () => void;
+  children: string;
+}) {
+  return (
+    <button
+      type="button"
+      tabIndex={-1}
+      className={on ? "mark on" : "mark"}
+      aria-label={label}
+      aria-pressed={on}
+      onMouseDown={(event) => {
+        event.preventDefault();
+      }}
+      onClick={(event) => {
+        event.stopPropagation();
+        onPress();
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Heart({ track, mark }: { track: Track; mark: Marker }) {
+  return (
+    <MarkButton
+      label="Favori"
+      on={track.favorite}
+      onPress={() => {
+        mark([track.id], { favorite: !track.favorite });
+      }}
+    >
+      ♥
+    </MarkButton>
+  );
+}
+
+/** Five stars; the one of the track's rating, clicked again, takes it away. */
+function Stars({ track, mark }: { track: Track; mark: Marker }) {
+  return (
+    <span className="stars" title={ratingText(track.rating)}>
+      {Array.from({ length: MAX_RATING }, (_, i) => i + 1).map((n) => (
+        <MarkButton
+          key={n}
+          label={ratingText(n)}
+          on={track.rating >= n}
+          onPress={() => {
+            mark([track.id], { rating: track.rating === n ? 0 : n });
+          }}
+        >
+          ★
+        </MarkButton>
+      ))}
+    </span>
+  );
+}
 
 interface Props {
   /** In the order shown. */
@@ -53,6 +133,7 @@ export function TrackTable({
   label,
 }: Props) {
   const rowHeight = useRowHeight("track");
+  const mark = useMarks();
   const scroller = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [height, setHeight] = useState(FALLBACK_HEIGHT);
@@ -204,6 +285,15 @@ export function TrackTable({
         clickRow(selection, tracks, tracks[here].id, { ctrl: event.ctrlKey, shift: false }),
         here,
       );
+    } else if (RATING_KEY.test(event.key) && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      // 0 to 5 rate the selection, else the track with the focus.
+      event.preventDefault();
+      const rated = selected.length > 0 ? selected : focusIndex >= 0 ? [tracks[focusIndex]] : [];
+      if (rated.length > 0)
+        mark(
+          rated.map((t) => t.id),
+          { rating: Number(event.key) },
+        );
     } else if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
       // Letters typed jump to the first title that starts with them.
       const now = Date.now();
@@ -337,8 +427,14 @@ export function TrackTable({
                 style={{ top: index * rowHeight, gridTemplateColumns: template }}
               >
                 {columns.map((c) => (
-                  <div key={c.id} role="gridcell" className={c.numeric ? "num" : undefined}>
-                    {c.text(track, context)}
+                  <div key={c.id} role="gridcell" className={cellClass(c)}>
+                    {c.id === "favorite" ? (
+                      <Heart track={track} mark={mark} />
+                    ) : c.id === "rating" ? (
+                      <Stars track={track} mark={mark} />
+                    ) : (
+                      c.text(track, context)
+                    )}
                     {c.id === "title" && flag && <span className="track-flag">{flag}</span>}
                   </div>
                 ))}

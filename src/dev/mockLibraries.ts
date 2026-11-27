@@ -15,6 +15,7 @@ import {
   type Settings,
 } from "../lib/libraries";
 import type { AlbumView } from "../lib/albums";
+import type { Mark } from "../lib/marks";
 import type { TrackRow, TrackView } from "../lib/tracks";
 import { mockTracks } from "./mockTracks";
 
@@ -215,6 +216,12 @@ function coverOf(row: TrackRow): Uint8Array<ArrayBuffer> {
   return new TextEncoder().encode(svg);
 }
 
+interface MarkArgs {
+  ids?: number[];
+  favorite?: boolean | null;
+  rating?: number | null;
+}
+
 function refuse(error: LibraryError): Promise<never> {
   // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
   return Promise.reject(error);
@@ -282,6 +289,34 @@ export function createMockLibraries({
       if (row) return row;
     }
     return undefined;
+  }
+  /** The favourites and ratings changed (KAN-32), by track id. */
+  const marks = new Map<unknown, { favorite: boolean; rating: number }>();
+  /** The rows as the list gets them: with the marks changed since. */
+  function listed(): TrackRow[] {
+    return entries.flatMap(tracksOf).map((row) => {
+      const mark = marks.get(row[0]);
+      if (!mark) return row;
+      const copy: TrackRow = [...row];
+      copy[21] = mark.favorite;
+      copy[22] = mark.rating;
+      return copy;
+    });
+  }
+  /** What tracks_mark does: the ids known marked, a field left out kept. */
+  function mark({ ids = [], favorite = null, rating = null }: MarkArgs): number {
+    let changed = 0;
+    for (const id of ids) {
+      const row = rowById(id);
+      if (!row) continue;
+      const before = marks.get(id) ?? { favorite: row[21], rating: row[22] };
+      marks.set(id, {
+        favorite: favorite ?? before.favorite,
+        rating: Math.min(5, rating ?? before.rating),
+      });
+      changed += 1;
+    }
+    return changed;
   }
   const queue: Job[] = [];
   let running: Running | null = null;
@@ -430,7 +465,33 @@ export function createMockLibraries({
         // The copy of kanade.db happens on the Rust side: nothing to show.
         return null;
       case "tracks_list":
-        return entries.flatMap(tracksOf);
+        return listed();
+      case "tracks_mark":
+        return mark(args as MarkArgs);
+      case "marks_export":
+        // The save dialog: saved, with the tracks marked.
+        return { tracks: listed().filter((row) => row[21] || row[22] > 0).length };
+      case "marks_import":
+        // The open dialog: a file of three tracks found here, one not.
+        return [
+          ...entries
+            .flatMap(tracksOf)
+            .slice(0, 3)
+            .map<Mark>((row, i) => ({
+              title: row[5],
+              artist: row[6] ?? "",
+              album: row[8] ?? "",
+              favorite: i === 0,
+              rating: i + 3,
+            })),
+          {
+            title: "Un morceau d'un autre PC",
+            artist: "Inconnu",
+            album: "",
+            favorite: true,
+            rating: 0,
+          },
+        ];
       case "track_reveal": {
         const known = entries.some((e) => tracksOf(e).some((row) => row[0] === idOf(args)));
         // The Explorer opens on the Rust side: nothing to show here.

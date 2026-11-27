@@ -17,10 +17,11 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State, WebviewWindow, Window, WindowEvent};
 
 use crate::background;
+use crate::library::marks;
 use crate::library::{
     AlbumView, Appearance, CoverSize, DropReport, Library, LibraryError, LibraryId, LibraryService,
-    LibraryView, RevealTarget, ScanErrors, ScanEvents, ScanProgress, Settings, TrackId, TrackRow,
-    TrackView, WatchUpdate,
+    LibraryView, Mark, RevealTarget, ScanErrors, ScanEvents, ScanProgress, Settings, TrackId,
+    TrackRow, TrackView, WatchUpdate,
 };
 
 /// The folder of the covers' thumbnails, apart from the database
@@ -109,6 +110,8 @@ impl<R: Runtime> ScanEvents for TauriEvents<R> {
 trait Dialogs {
     fn pick_folder(&self, title: &str) -> Option<PathBuf>;
     fn save_text(&self, title: &str, file_name: &str) -> Option<PathBuf>;
+    /// A JSON file to save (`save`) or to open.
+    fn json_file(&self, title: &str, save: Option<&str>) -> Option<PathBuf>;
 }
 
 /// The dialogs of Windows, over the window.
@@ -136,6 +139,17 @@ impl<R: Runtime> Dialogs for WindowDialogs<R> {
             .add_filter("Texte", &["txt"])
             .set_parent(&self.0)
             .save_file()
+    }
+
+    fn json_file(&self, title: &str, save: Option<&str>) -> Option<PathBuf> {
+        let dialog = rfd::FileDialog::new()
+            .set_title(title)
+            .add_filter("JSON", &["json"])
+            .set_parent(&self.0);
+        match save {
+            Some(file_name) => dialog.set_file_name(file_name).save_file(),
+            None => dialog.pick_file(),
+        }
     }
 }
 
@@ -171,6 +185,38 @@ fn export_errors(
     };
     service.export_errors(id, &path)?;
     Ok(true)
+}
+
+/// What an export of the favourites and ratings did: saved, how many.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Exported {
+    pub tracks: usize,
+}
+
+fn export_marks(
+    libraries: &Libraries,
+    dialogs: &impl Dialogs,
+) -> Result<Option<Exported>, LibraryError> {
+    let service = libraries.get()?;
+    let Some(path) = dialogs.json_file(
+        "Exporter les favoris et les notes",
+        Some("Kanade - favoris et notes.json"),
+    ) else {
+        return Ok(None);
+    };
+    let tracks = service.export_marks(&path)?;
+    Ok(Some(Exported { tracks }))
+}
+
+fn import_marks(
+    libraries: &Libraries,
+    dialogs: &impl Dialogs,
+) -> Result<Option<Vec<Mark>>, LibraryError> {
+    libraries.get()?;
+    let Some(path) = dialogs.json_file("Importer des favoris et des notes", None) else {
+        return Ok(None);
+    };
+    marks::read_file(&path).map(Some)
 }
 
 fn dropped(libraries: &Libraries, paths: &[PathBuf]) -> DropReport {
@@ -281,6 +327,39 @@ pub fn settings_set(
     libraries: State<'_, Libraries>,
 ) -> Result<(), LibraryError> {
     libraries.get()?.save_settings(&settings)
+}
+
+/// Sets the favourite, the rating (0 to 5), or both, of these tracks
+/// (KAN-32). By id; returns how many changed.
+#[tauri::command(async)]
+pub fn tracks_mark(
+    ids: Vec<TrackId>,
+    favorite: Option<bool>,
+    rating: Option<u8>,
+    libraries: State<'_, Libraries>,
+) -> Result<usize, LibraryError> {
+    libraries.get()?.mark(&ids, favorite, rating)
+}
+
+/// Saves the favourites and ratings in a file the user picks; none when
+/// the dialog is closed.
+#[tauri::command(async)]
+pub fn marks_export(
+    window: WebviewWindow,
+    libraries: State<'_, Libraries>,
+) -> Result<Option<Exported>, LibraryError> {
+    export_marks(&libraries, &WindowDialogs(window))
+}
+
+/// Reads the favourites and ratings of a file the user picks (Kanade's,
+/// or Ongaku's backup); the interface finds the tracks again. None when
+/// the dialog is closed.
+#[tauri::command(async)]
+pub fn marks_import(
+    window: WebviewWindow,
+    libraries: State<'_, Libraries>,
+) -> Result<Option<Vec<Mark>>, LibraryError> {
+    import_marks(&libraries, &WindowDialogs(window))
 }
 
 /// The health reports the user chose to ignore (KAN-28).
@@ -469,6 +548,44 @@ mod tests {
         fn save_text(&self, _: &str, _: &str) -> Option<PathBuf> {
             self.0.clone()
         }
+        fn json_file(&self, _: &str, _: Option<&str>) -> Option<PathBuf> {
+            self.0.clone()
+        }
+    }
+
+    /// The favourites and ratings go out to a file and come back from it
+    /// (KAN-32); a closed dialog does nothing.
+    #[test]
+    fn the_marks_go_out_to_a_file_and_come_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let music = dir.path().join("Musique");
+        fs::create_dir(&music).unwrap();
+        crate::library::track::tests::tagged_copy("tone.mp3", &music.join("a.mp3"), "Un");
+        let libraries = libraries(dir.path());
+        add(&libraries, &Answer(Some(music))).unwrap();
+        libraries.get().unwrap().wait_idle();
+        let service = libraries.get().unwrap();
+        let id = TrackId(service.tracks().unwrap()[0].0);
+        assert_eq!(service.mark(&[id], Some(true), Some(4)).unwrap(), 1);
+        let row = &service.tracks().unwrap()[0];
+        assert_eq!((row.21, row.22), (true, 4));
+
+        let file = dir.path().join("notes.json");
+        let exported = export_marks(&libraries, &Answer(Some(file.clone()))).unwrap();
+        assert_eq!(exported, Some(Exported { tracks: 1 }));
+        let marks = import_marks(&libraries, &Answer(Some(file)))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (marks[0].title.as_str(), marks[0].favorite, marks[0].rating),
+            ("Un", true, 4)
+        );
+
+        assert_eq!(export_marks(&libraries, &Answer(None)).unwrap(), None);
+        assert_eq!(import_marks(&libraries, &Answer(None)).unwrap(), None);
+        let none = Libraries(None);
+        assert!(export_marks(&none, &Answer(None)).is_err());
+        assert!(import_marks(&none, &Answer(None)).is_err());
     }
 
     fn libraries(dir: &Path) -> Libraries {
@@ -761,6 +878,7 @@ mod tests {
                 health_ignored_get,
                 health_ignored_set,
                 tracks_without_folder_cover,
+                tracks_mark,
             ])
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap();
@@ -939,6 +1057,15 @@ mod tests {
             320
         );
 
+        assert_eq!(
+            invoke(
+                &webview,
+                "tracks_mark",
+                serde_json::json!({ "ids": [9999], "favorite": true, "rating": null })
+            )
+            .unwrap(),
+            0
+        );
         assert_eq!(
             invoke(
                 &webview,

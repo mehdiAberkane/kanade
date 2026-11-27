@@ -41,6 +41,8 @@ function track(folder: string, fields: Partial<Track> = {}): Track {
     modifiedMs: 0,
     hasCover: false,
     untitled: false,
+    favorite: false,
+    rating: 0,
     ...fields,
   };
 }

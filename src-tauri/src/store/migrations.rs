@@ -14,7 +14,7 @@ use rusqlite::Connection;
 use super::{StoreError, user_version};
 
 /// The version the steps below lead to.
-pub const LATEST_VERSION: i32 = 6;
+pub const LATEST_VERSION: i32 = 7;
 
 struct Migration {
     version: i32,
@@ -127,6 +127,14 @@ CREATE TABLE settings (
     Migration {
         version: 6,
         sql: "ALTER TABLE libraries ADD COLUMN watch INTEGER NOT NULL DEFAULT 1;",
+    },
+    // KAN-32: each track's favourite and rating (0 to 5 stars, 0 for none),
+    // on its row: a moved or renamed file keeps its row, so they follow it.
+    Migration {
+        version: 7,
+        sql: "
+ALTER TABLE tracks ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tracks ADD COLUMN rating INTEGER NOT NULL DEFAULT 0;",
     },
 ];
 
@@ -295,6 +303,24 @@ mod tests {
             .query_row("SELECT watch FROM libraries", [], |r| r.get(0))
             .unwrap();
         assert!(watch);
+    }
+
+    #[test]
+    fn step_7_gives_the_tracks_before_no_favourite_nor_rating() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate_to(&mut conn, 6).unwrap();
+        conn.execute_batch(
+            "INSERT INTO tracks (path, size, modified_ms, format, has_cover)
+             VALUES ('a.flac', 1, 1, 'FLAC', 0);",
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let (favorite, rating): (bool, i64) = conn
+            .query_row("SELECT favorite, rating FROM tracks", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!((favorite, rating), (false, 0));
     }
 
     #[test]

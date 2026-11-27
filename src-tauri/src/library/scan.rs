@@ -147,6 +147,9 @@ pub enum LibraryError {
     /// What came as a background image is not a JPEG Kanade can show
     /// (the interface sends one, reduced).
     NotAnImage,
+    /// The file chosen to import marks from is not one Kanade or Ongaku
+    /// wrote (KAN-32).
+    NotMarksFile,
     /// A file could not be written (the export of the errors).
     Io {
         message: String,
@@ -171,6 +174,7 @@ impl fmt::Display for LibraryError {
             Self::EmptyName => f.write_str("a library needs a name"),
             Self::TrackNotFound => f.write_str("no such track"),
             Self::NotAnImage => f.write_str("not a JPEG image Kanade can show"),
+            Self::NotMarksFile => f.write_str("not a file of favourites and ratings"),
             Self::Io { message } => write!(f, "file error: {message}"),
             Self::Database { message } => write!(f, "library database error: {message}"),
         }

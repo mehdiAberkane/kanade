@@ -76,6 +76,7 @@ export type LibraryError =
   | { code: "empty_name" }
   | { code: "track_not_found" }
   | { code: "not_an_image" }
+  | { code: "not_marks_file" }
   | { code: "io"; message: string }
   | { code: "database"; message: string };
 
@@ -184,8 +185,14 @@ export function errorText(error: unknown): string {
       return "Ce morceau n'est plus dans Kanade.";
     case "not_an_image":
       return "Cette image ne peut pas servir de fond : choisis une photo JPEG, PNG ou WebP.";
+    case "not_marks_file":
+      return (
+        "Ce fichier ne contient pas de favoris ni de notes : choisis un fichier exporté par " +
+        "Kanade, ou une sauvegarde d'Ongaku."
+      );
     case "io":
-      return `Impossible d'écrire le fichier : ${error.message}`;
+      // Written (an export) or read (an import).
+      return `Erreur de fichier : ${error.message}`;
     case "database":
       return `Erreur de la base de Kanade : ${error.message}`;
   }

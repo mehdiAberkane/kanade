@@ -212,6 +212,20 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   `docs/sante.md`, à garder pareilles qu'Ongaku (ONG-59). Les signalements ignorés vont
   dans `settings` (`health_ignored`). Mesuré sur 50 000 morceaux : albums en 95 ms, puis
   contrôles en 100 ms, lancés juste après l'affichage de la page.
+- Favoris et notes (KAN-32, `library/marks.rs`, `src/lib/marks.ts`) :
+  - un cœur et une note de 0 à 5 étoiles, dans les colonnes `favorite` et `rating` de
+    `tracks` : ils suivent le morceau renommé ou déplacé ;
+  - la liste les montre tout de suite (`mark` de `useTracks`, donné aux listes par
+    `MarksContext`), puis les envoie à `tracks_mark` ; un refus relit la liste ;
+  - touches 0 à 5 : la sélection, sinon le morceau qui a le focus. Les lettres sautent
+    toujours au titre. Le favori : le cœur ou le menu du morceau ;
+  - échange (`marks_export`, `marks_import`) : un JSON `kanade-marks` qui décrit chaque
+    morceau par titre, artiste et album. La sauvegarde d'Ongaku se lit aussi (ses
+    favoris). L'interface retrouve les morceaux comme Ongaku (même titre, artiste et
+    album, sinon titre et artiste) et ajoute sans rien retirer ;
+  - une colonne d'une nouvelle version se place après celle qu'elle suit par défaut
+    (`completeView`) ;
+  - lire et écrire les notes dans les fichiers : KAN-49, avec KAN-7.
 - Pochettes (`library/covers.rs`, `src/lib/covers.ts`) :
   - `track_cover` reçoit un identifiant de morceau et renvoie un JPEG de 400 ou 900 px,
     jamais l'image d'origine ni un chemin ;

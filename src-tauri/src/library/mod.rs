@@ -8,6 +8,7 @@ pub mod health;
 pub mod index;
 pub mod libraries;
 pub mod listing;
+pub mod marks;
 pub mod paths;
 pub mod scan;
 pub mod scanner;
@@ -20,6 +21,7 @@ pub use covers::{CoverSize, CoverSource};
 pub use index::{Index, IndexedTrack, TrackId, TrackStatus};
 pub use libraries::{LastScan, Library, LibraryId, ScanOutcome, Settings, TooBroad};
 pub use listing::{AlbumView, RevealTarget, TrackRow, TrackView};
+pub use marks::Mark;
 pub use scan::{
     KEEP_GONE_MS, LibraryError, ScanControl, ScanError, ScanProgress, ScanReport, scan_folder,
 };

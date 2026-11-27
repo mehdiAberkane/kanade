@@ -20,6 +20,8 @@ function row(fields: {
   format?: string;
   bitrate?: number;
   file?: string;
+  favorite?: boolean;
+  rating?: number;
 }): TrackRow {
   const id = nextId++;
   const album = fields.album ?? "Album";
@@ -45,6 +47,8 @@ function row(fields: {
     1_700_000_000_000,
     true,
     false,
+    fields.favorite ?? false,
+    fields.rating ?? 0,
   ];
 }
 
@@ -52,7 +56,14 @@ const SAMPLE = (): TrackRow[] => {
   nextId = 1;
   return [
     row({ title: "Blue in Green", artist: "Miles Davis", album: "Kind of Blue", year: 1959 }),
-    row({ title: "So What", artist: "Miles Davis", album: "Kind of Blue", year: 1959 }),
+    row({
+      title: "So What",
+      artist: "Miles Davis",
+      album: "Kind of Blue",
+      year: 1959,
+      favorite: true,
+      rating: 4,
+    }),
     row({
       title: "Highway to Hell",
       artist: "AC/DC",
@@ -61,6 +72,7 @@ const SAMPLE = (): TrackRow[] => {
       year: 1979,
       format: "MP3",
       bitrate: 320,
+      rating: 2,
     }),
     row({
       title: "01 - piste",
@@ -259,6 +271,29 @@ describe("Filters", () => {
         .getAllByRole("button")
         .map((b) => b.textContent),
     ).toEqual(["2 à 5 min ×", "Ajoutés : 30 derniers jours ×", "Tags incomplets ×"]);
+  });
+
+  it("keeps the favourites, or the tracks rated so many stars or more", async () => {
+    backend();
+    const app = await renderApp();
+    const panel = await openPanel(app);
+    await app.user.click(panel.getByRole("checkbox", { name: /^Seulement les favoris/ }));
+    expect(titles(app)).toEqual(["So What"]);
+    await app.user.click(panel.getByRole("checkbox", { name: /^Seulement les favoris/ }));
+    const rating = app.within(panel.getByRole("group", { name: "Note" }));
+    expect(rating.getByRole("radio", { name: /^5 étoiles/ }).parentElement?.textContent).toMatch(
+      /0$/,
+    );
+    await app.user.click(rating.getByRole("radio", { name: /^2 étoiles ou plus/ }));
+    expect(titles(app).sort()).toEqual(["Highway to Hell", "So What"]);
+    await app.user.click(rating.getByRole("radio", { name: /^3 étoiles ou plus/ }));
+    expect(titles(app)).toEqual(["So What"]);
+    expect(
+      app
+        .within(app.screen.getByRole("list", { name: "Filtres actifs" }))
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["3 étoiles ou plus ×"]);
   });
 
   it("removes a tag, or all of them with the search", async () => {
