@@ -11,6 +11,7 @@ pub mod libraries;
 pub mod listing;
 pub mod marks;
 pub mod paths;
+pub mod playback;
 pub mod scan;
 pub mod scanner;
 pub mod service;

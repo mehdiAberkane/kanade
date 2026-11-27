@@ -154,6 +154,22 @@ pub enum LibraryError {
     /// The file chosen to import marks from is not one Kanade or Ongaku
     /// wrote (KAN-32).
     NotMarksFile,
+    /// The file of a track to play is no longer on the disk (KAN-45).
+    FileGone {
+        name: String,
+    },
+    /// A track's path is too long for most players (past `MAX_PATH`).
+    PathTooLong {
+        name: String,
+    },
+    /// The player chosen, or asked for, is not on the disk.
+    PlayerNotFound,
+    /// The file picked as a player is not a program (.exe).
+    NotAProgram,
+    /// Windows refused to start the player.
+    LaunchFailed {
+        message: String,
+    },
     /// What came to be saved as the statistics' summary is not a text of a
     /// reasonable size, or not a PNG (KAN-36).
     NotASummary,
@@ -188,6 +204,11 @@ impl fmt::Display for LibraryError {
             Self::NotAnImage => f.write_str("not a JPEG image Kanade can show"),
             Self::NotMarksFile => f.write_str("not a file of favourites and ratings"),
             Self::NotASummary => f.write_str("not a summary Kanade can save"),
+            Self::FileGone { name } => write!(f, "file gone: {name}"),
+            Self::PathTooLong { name } => write!(f, "path too long for a player: {name}"),
+            Self::PlayerNotFound => f.write_str("the player is not on the disk"),
+            Self::NotAProgram => f.write_str("not a program"),
+            Self::LaunchFailed { message } => write!(f, "the player did not start: {message}"),
             Self::NotInLibrary { name } => {
                 write!(f, "this folder is not inside the library {name}")
             }

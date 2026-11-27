@@ -18,16 +18,24 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, State, WebviewWindow, Window, 
 
 use crate::background;
 use crate::library::marks;
+use crate::library::playback::PlayerChoice;
 use crate::library::{
     AlbumView, Appearance, CoverSize, DropReport, Library, LibraryError, LibraryId, LibraryService,
     LibraryView, Mark, RevealTarget, ScanErrors, ScanEvents, ScanProgress, Settings, TrackId,
     TrackRow, TrackView, WatchUpdate,
 };
+use crate::player::launch::{Launcher, System};
+use crate::player::registry::{Finder, Registry, WindowsRegistry};
+use crate::player::{self, Environment, Outcome, Players, TrackFile};
 use crate::summary;
 
 /// The folder of the covers' thumbnails, apart from the database
 /// (`%LOCALAPPDATA%\fr.devsecopsforce.kanade\cache\covers`).
 pub struct Covers(pub PathBuf);
+
+/// Where a playlist for a long selection is written, for the player
+/// (`cache\playlists`, KAN-45).
+pub struct Playlists(pub PathBuf);
 
 /// The background image's file (`background.rs`), in the data folder; none
 /// when that folder is unknown, as the database then is.
@@ -112,6 +120,8 @@ trait Dialogs {
     fn pick_folder(&self, title: &str) -> Option<PathBuf>;
     /// A folder, the picker opened in `start`.
     fn pick_subfolder(&self, title: &str, start: &Path) -> Option<PathBuf>;
+    /// A program (.exe), to play with (KAN-45).
+    fn pick_program(&self, title: &str) -> Option<PathBuf>;
     fn save_text(&self, title: &str, file_name: &str) -> Option<PathBuf>;
     fn save_png(&self, title: &str, file_name: &str) -> Option<PathBuf>;
     /// A JSON file to save (`save`) or to open.
@@ -148,6 +158,21 @@ impl<R: Runtime> Dialogs for WindowDialogs<R> {
     /// The end-to-end test build opens no dialog: nothing chosen.
     #[cfg(feature = "e2e")]
     fn pick_subfolder(&self, _: &str, _: &Path) -> Option<PathBuf> {
+        None
+    }
+
+    #[cfg(not(feature = "e2e"))]
+    fn pick_program(&self, title: &str) -> Option<PathBuf> {
+        rfd::FileDialog::new()
+            .set_title(title)
+            .add_filter("Programmes", &["exe"])
+            .set_parent(&self.0)
+            .pick_file()
+    }
+
+    /// The end-to-end test build opens no dialog: nothing chosen.
+    #[cfg(feature = "e2e")]
+    fn pick_program(&self, _: &str) -> Option<PathBuf> {
         None
     }
 
@@ -199,6 +224,126 @@ fn relocate(
         return Ok(None);
     };
     service.relocate(id, &folder).map(Some)
+}
+
+fn on_disk(path: &Path) -> bool {
+    path.is_file()
+}
+
+fn env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
+/// Where a player runs: this Windows' registry and programs (KAN-45).
+fn windows_players(playlists: &Path) -> Environment<'_, WindowsRegistry, System> {
+    Environment {
+        finder: Finder {
+            registry: &WindowsRegistry,
+            exists: &on_disk,
+            var: &env_var,
+        },
+        launcher: &System,
+        playlists,
+        system_root: env_var("SystemRoot"),
+    }
+}
+
+fn players_of(
+    libraries: &Libraries,
+    env: &Environment<'_, impl Registry, impl Launcher>,
+) -> Result<Players, LibraryError> {
+    Ok(env.players(&libraries.get()?.player_choice()?))
+}
+
+/// Chooses the player `id` among the ones found, or Windows' own (none).
+fn set_player(
+    libraries: &Libraries,
+    env: &Environment<'_, impl Registry, impl Launcher>,
+    id: Option<&str>,
+) -> Result<Players, LibraryError> {
+    let service = libraries.get()?;
+    let choice = match id {
+        None => PlayerChoice::Default,
+        Some(id) => {
+            let path = env
+                .program_of(&service.player_choice()?, id)
+                .ok_or(LibraryError::PlayerNotFound)?;
+            PlayerChoice::Program {
+                path: path.to_string_lossy().into_owned(),
+            }
+        }
+    };
+    service.save_player_choice(&choice)?;
+    Ok(env.players(&choice))
+}
+
+/// Chooses a program in Windows' picker; none when it is closed.
+fn pick_player(
+    libraries: &Libraries,
+    env: &Environment<'_, impl Registry, impl Launcher>,
+    dialogs: &impl Dialogs,
+) -> Result<Option<Players>, LibraryError> {
+    let service = libraries.get()?;
+    let Some(path) = dialogs.pick_program("Choisir le lecteur") else {
+        return Ok(None);
+    };
+    let is_program = path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("exe"));
+    let path =
+        crate::library::paths::normalize_root(&path).map_err(|_| LibraryError::NotAProgram)?;
+    if !is_program || !path.is_file() {
+        return Err(LibraryError::NotAProgram);
+    }
+    let choice = PlayerChoice::Program {
+        path: path.to_string_lossy().into_owned(),
+    };
+    service.save_player_choice(&choice)?;
+    Ok(Some(env.players(&choice)))
+}
+
+fn play_tracks(
+    libraries: &Libraries,
+    env: &Environment<'_, impl Registry, impl Launcher>,
+    ids: &[TrackId],
+    enqueue: bool,
+    allow_online: bool,
+) -> Result<Outcome, LibraryError> {
+    let service = libraries.get()?;
+    let files: Vec<TrackFile> = service
+        .track_paths(ids)?
+        .into_iter()
+        .map(TrackFile::of)
+        .collect();
+    env.play(&service.player_choice()?, &files, enqueue, allow_online)
+}
+
+fn open_track_with(
+    libraries: &Libraries,
+    env: &Environment<'_, impl Registry, impl Launcher>,
+    id: TrackId,
+) -> Result<(), LibraryError> {
+    let path = libraries.get()?.track_paths(&[id])?.remove(0);
+    env.open_with(&TrackFile::of(path))
+}
+
+fn try_player(
+    libraries: &Libraries,
+    env: &Environment<'_, impl Registry, impl Launcher>,
+) -> Result<String, LibraryError> {
+    env.try_player(&libraries.get()?.player_choice()?)
+}
+
+/// The icon of the player `id` as a PNG; empty when Windows has none.
+fn player_icon_of(
+    libraries: &Libraries,
+    env: &Environment<'_, impl Registry, impl Launcher>,
+    id: &str,
+) -> Result<Vec<u8>, LibraryError> {
+    let program = env
+        .program_of(&libraries.get()?.player_choice()?, id)
+        .ok_or(LibraryError::PlayerNotFound)?;
+    Ok(player::icon_png(&program).unwrap_or_default())
 }
 
 /// Saves the statistics' summary as text where the user chooses (KAN-36);
@@ -351,6 +496,90 @@ pub fn library_cancel_scan(
 ) -> Result<(), LibraryError> {
     libraries.get()?.cancel_scan(id);
     Ok(())
+}
+
+/// The players installed, and the one chosen (KAN-45).
+#[tauri::command(async)]
+pub fn players_list(
+    libraries: State<'_, Libraries>,
+    playlists: State<'_, Playlists>,
+) -> Result<Players, LibraryError> {
+    players_of(&libraries, &windows_players(&playlists.0))
+}
+
+/// Chooses the player `id` among the ones found; Windows' own for none.
+/// Never a path: only an id the list gave.
+#[tauri::command(async)]
+pub fn player_set(
+    id: Option<String>,
+    libraries: State<'_, Libraries>,
+    playlists: State<'_, Playlists>,
+) -> Result<Players, LibraryError> {
+    set_player(&libraries, &windows_players(&playlists.0), id.as_deref())
+}
+
+/// Chooses a program in Windows' picker; none when it is closed.
+#[tauri::command(async)]
+pub fn player_pick<R: Runtime>(
+    window: WebviewWindow<R>,
+    libraries: State<'_, Libraries>,
+    playlists: State<'_, Playlists>,
+) -> Result<Option<Players>, LibraryError> {
+    pick_player(
+        &libraries,
+        &windows_players(&playlists.0),
+        &WindowDialogs(window),
+    )
+}
+
+/// Starts the player chosen, without a file; its name.
+#[tauri::command(async)]
+pub fn player_try(
+    libraries: State<'_, Libraries>,
+    playlists: State<'_, Playlists>,
+) -> Result<String, LibraryError> {
+    try_player(&libraries, &windows_players(&playlists.0))
+}
+
+/// The icon of a player, as a PNG (empty when Windows has none).
+#[tauri::command(async)]
+pub fn player_icon(
+    id: String,
+    libraries: State<'_, Libraries>,
+    playlists: State<'_, Playlists>,
+) -> Result<tauri::ipc::Response, LibraryError> {
+    let png = player_icon_of(&libraries, &windows_players(&playlists.0), &id)?;
+    Ok(tauri::ipc::Response::new(png))
+}
+
+/// Plays the tracks with the player chosen, in this order, or adds them
+/// to what it plays (`enqueue`). Files kept online only start nothing
+/// unless `allowOnline`: the interface asks first.
+#[tauri::command(async)]
+pub fn tracks_play(
+    ids: Vec<TrackId>,
+    enqueue: bool,
+    allow_online: bool,
+    libraries: State<'_, Libraries>,
+    playlists: State<'_, Playlists>,
+) -> Result<Outcome, LibraryError> {
+    play_tracks(
+        &libraries,
+        &windows_players(&playlists.0),
+        &ids,
+        enqueue,
+        allow_online,
+    )
+}
+
+/// Windows' « Ouvrir avec » box for a track, to choose a program once.
+#[tauri::command(async)]
+pub fn track_open_with(
+    id: TrackId,
+    libraries: State<'_, Libraries>,
+    playlists: State<'_, Playlists>,
+) -> Result<(), LibraryError> {
+    open_track_with(&libraries, &windows_players(&playlists.0), id)
 }
 
 /// The statistics' summary as text, saved where the user chooses; false
@@ -679,6 +908,9 @@ mod tests {
         fn pick_subfolder(&self, _: &str, _: &Path) -> Option<PathBuf> {
             self.0.clone()
         }
+        fn pick_program(&self, _: &str) -> Option<PathBuf> {
+            self.0.clone()
+        }
         fn save_text(&self, _: &str, _: &str) -> Option<PathBuf> {
             self.0.clone()
         }
@@ -845,6 +1077,108 @@ mod tests {
         assert_eq!(
             save_summary_image(&Answer(Some(png)), b"GIF89a").unwrap_err(),
             LibraryError::NotASummary
+        );
+    }
+
+    /// KAN-45: the player chosen, picked, tried; tracks played by id, and
+    /// Windows' « Ouvrir avec » box, all with a registry and programs of
+    /// the test's own.
+    #[test]
+    fn the_tracks_play_with_the_player_chosen() {
+        use crate::player::registry::tests::{finder, sample};
+        use crate::player::tests::Recorder;
+
+        let dir = tempfile::tempdir().unwrap();
+        let music = dir.path().join("Musique");
+        fs::create_dir(&music).unwrap();
+        crate::library::track::tests::tagged_copy("tone.mp3", &music.join("a & b.mp3"), "Un");
+        let libraries = libraries(dir.path());
+        add(&libraries, &Answer(Some(music))).unwrap();
+        libraries.get().unwrap().wait_idle();
+        let id = TrackId(libraries.get().unwrap().tracks().unwrap()[0].0);
+
+        let reg = sample();
+        let launcher = Recorder::default();
+        let env = Environment {
+            finder: finder(&reg),
+            launcher: &launcher,
+            playlists: dir.path(),
+            system_root: Some(r"C:\Windows".into()),
+        };
+        let players = players_of(&libraries, &env).unwrap();
+        assert_eq!(players.detected.len(), 3);
+        let vlc = players.detected[2].id.clone();
+        let chosen = set_player(&libraries, &env, Some(&vlc)).unwrap();
+        assert!(matches!(
+            chosen.chosen,
+            player::Chosen::Program {
+                available: true,
+                ..
+            }
+        ));
+        assert_eq!(
+            set_player(&libraries, &env, Some("nope")).unwrap_err(),
+            LibraryError::PlayerNotFound
+        );
+
+        let outcome = play_tracks(&libraries, &env, &[id], true, false).unwrap();
+        assert_eq!(outcome.player, "VLC");
+        assert_eq!(try_player(&libraries, &env), Ok("VLC".into()));
+        open_track_with(&libraries, &env, id).unwrap();
+        assert_eq!(
+            play_tracks(&libraries, &env, &[TrackId(9999)], false, false).unwrap_err(),
+            LibraryError::TrackNotFound
+        );
+        let started = launcher.started.borrow();
+        assert!(started[0].1.last().unwrap().ends_with("a & b.mp3"));
+        assert_eq!(started.len(), 3);
+        drop(started);
+        // The icon of a program of the test: a PNG when VLC is installed on
+        // this PC, nothing otherwise.
+        let icon = player_icon_of(&libraries, &env, &vlc).unwrap();
+        assert!(icon.is_empty() || icon.starts_with(&[0x89, b'P', b'N', b'G']));
+        assert_eq!(
+            player_icon_of(&libraries, &env, "nope"),
+            Err(LibraryError::PlayerNotFound)
+        );
+
+        // Back to Windows' own; then a program picked, or something else.
+        assert!(matches!(
+            set_player(&libraries, &env, None).unwrap().chosen,
+            player::Chosen::Default { .. }
+        ));
+        assert_eq!(pick_player(&libraries, &env, &Answer(None)), Ok(None));
+        let text = dir.path().join("notes.txt");
+        fs::write(&text, "x").unwrap();
+        assert_eq!(
+            pick_player(&libraries, &env, &Answer(Some(text))),
+            Err(LibraryError::NotAProgram)
+        );
+        assert_eq!(
+            pick_player(
+                &libraries,
+                &env,
+                &Answer(Some(dir.path().join("absent.exe")))
+            ),
+            Err(LibraryError::NotAProgram)
+        );
+        let program = dir.path().join("Lecteur.exe");
+        fs::write(&program, "x").unwrap();
+        let picked = pick_player(&libraries, &env, &Answer(Some(program)))
+            .unwrap()
+            .unwrap();
+        let player::Chosen::Program { player, .. } = picked.chosen else {
+            panic!("{:?}", picked.chosen);
+        };
+        assert_eq!(player.name, "Lecteur");
+        let none = Libraries(None);
+        assert!(players_of(&none, &env).is_err());
+        assert!(
+            windows_players(dir.path())
+                .players(&PlayerChoice::Default)
+                .detected
+                .len()
+                < 100
         );
     }
 
@@ -1073,6 +1407,11 @@ mod tests {
                 health_ignored_set,
                 tracks_without_folder_cover,
                 tracks_mark,
+                players_list,
+                player_set,
+                player_icon,
+                tracks_play,
+                track_open_with,
                 library_include_folder,
                 library_set_excluded_extensions,
                 track_exclude_folder,
@@ -1094,6 +1433,7 @@ mod tests {
             TauriEvents(app.handle().clone()),
             TooBroad::default(),
         ))));
+        app.manage(Playlists(dir.path().join("playlists")));
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .unwrap();
@@ -1291,6 +1631,28 @@ mod tests {
             serde_json::json!({ "code": "track_not_found" })
         );
         wait_idle();
+        // KAN-45: this Windows' players read, Windows' own chosen; a track
+        // unknown starts nothing.
+        let players = invoke(&webview, "players_list", serde_json::json!({})).unwrap();
+        assert!(players["detected"].is_array());
+        let own = invoke(&webview, "player_set", serde_json::json!({ "id": null })).unwrap();
+        assert_eq!(own["chosen"]["kind"], "default");
+        assert_eq!(
+            invoke(&webview, "player_icon", serde_json::json!({ "id": "nope" })).unwrap_err(),
+            serde_json::json!({ "code": "player_not_found" })
+        );
+        for (cmd, args) in [
+            (
+                "tracks_play",
+                serde_json::json!({ "ids": [9999], "enqueue": false, "allowOnline": false }),
+            ),
+            ("track_open_with", serde_json::json!({ "id": 9999 })),
+        ] {
+            assert_eq!(
+                invoke(&webview, cmd, args).unwrap_err(),
+                serde_json::json!({ "code": "track_not_found" })
+            );
+        }
         assert_eq!(
             invoke(
                 &webview,

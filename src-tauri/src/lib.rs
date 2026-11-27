@@ -7,6 +7,7 @@ mod commands;
 #[cfg(feature = "e2e")]
 mod e2e;
 pub mod library;
+mod player;
 pub mod store;
 mod summary;
 
@@ -108,6 +109,7 @@ pub fn run() {
             app.manage(libraries);
             let covers = cache.join("cache").join("covers");
             app.manage(Covers(covers.clone()));
+            app.manage(commands::Playlists(cache.join("cache").join("playlists")));
             // The covers of tracks gone or changed, off the main thread.
             let handle = app.handle().clone();
             std::thread::spawn(move || {
@@ -129,6 +131,13 @@ pub fn run() {
             commands::library_scan,
             commands::library_cancel_scan,
             commands::library_relocate,
+            commands::players_list,
+            commands::player_set,
+            commands::player_pick,
+            commands::player_try,
+            commands::player_icon,
+            commands::tracks_play,
+            commands::track_open_with,
             commands::stats_save_text,
             commands::stats_save_image,
             commands::library_exclude_folder,

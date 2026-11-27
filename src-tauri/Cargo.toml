@@ -43,6 +43,12 @@ image = { version = "0.25.10", default-features = false, features = ["jpeg", "pn
 # library/watcher.rs). Kept on 8: notify 9 brings xxhash-rust, under the Boost
 # license (BSL-1.0), which deny.toml does not allow (chosen on 26/11/2026).
 notify = "8.2.0"
+# Playing with a player installed on Windows (KAN-45, player/): the
+# registry tells the players, already in the tree through Tauri; the
+# icons are asked of Windows as the Explorer does (MIT, chosen on
+# 27/11/2026). Neither puts unsafe code in Kanade.
+windows-registry = "0.6.1"
+file_icon_provider = "1.0.2"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
