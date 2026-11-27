@@ -4,6 +4,7 @@ import { AppearancePage } from "./components/AppearancePage";
 import { AppearanceProvider } from "./components/AppearanceProvider";
 import { DatabaseBanner } from "./components/DatabaseBanner";
 import { DropZone } from "./components/DropZone";
+import { UpdateNotice } from "./components/UpdateNotice";
 import { HealthPage } from "./components/HealthPage";
 import { LibrariesPage } from "./components/LibrariesPage";
 import { SettingsPage } from "./components/SettingsPage";
@@ -92,6 +93,7 @@ function App() {
           {page === "settings" && <SettingsPage version={version} onInstall={confirm} />}
         </main>
         <DropZone />
+        <UpdateNotice onOpen={confirm} />
         {confirming && (
           <UpdateDialog
             version={version}
@@ -135,9 +137,10 @@ function UpdateButton({ onOpen }: { onOpen: () => void }) {
   if (status.kind === "backingUp" || status.kind === "installing") {
     return <span className="update-btn busy">{statusLine(status)?.text}</span>;
   }
+  // Small, on every page, until it is installed (KAN-51).
   return (
-    <button className="update-btn" onClick={onOpen}>
-      ⬆ Mettre à jour vers {available}
+    <button className="update-btn" title="Voir les nouveautés et installer" onClick={onOpen}>
+      ⬆ {available} disponible
     </button>
   );
 }
