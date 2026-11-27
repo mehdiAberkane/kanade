@@ -107,6 +107,15 @@ describe("errorText", () => {
       "Ce fichier n'est pas un programme : choisis le .exe d'un lecteur.",
     ],
     [{ code: "launch_failed", message: "refusé" }, "Le lecteur n'a pas démarré : refusé"],
+    [
+      { code: "invalid_tag", field: "year" },
+      "Une des valeurs ne peut pas être écrite dans un tag : rien n'a été modifié.",
+    ],
+    [
+      { code: "tags_busy" },
+      "Des tags sont déjà en cours d'écriture : attends la fin, ou arrête-la.",
+    ],
+    [{ code: "nothing_to_undo" }, "Aucune modification des tags à annuler."],
     [{ code: "io", message: "denied" }, "Erreur de fichier : denied"],
     [{ code: "database", message: "locked" }, "Erreur de la base de Kanade : locked"],
   ])("tells %o in French", (error, text) => {

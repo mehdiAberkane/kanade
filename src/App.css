@@ -959,6 +959,108 @@ main {
   margin-top: 1.25rem;
 }
 
+/* --- The tag editor (KAN-7) --------------------------------------------- */
+
+.tag-editor {
+  width: min(40rem, 100%);
+  overflow-y: auto;
+}
+
+.tag-subject {
+  overflow-wrap: anywhere;
+}
+
+/* The texts take the whole width, the numbers two by two. */
+.tag-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem 1rem;
+  margin-top: 0.75rem;
+}
+
+.tag-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.tag-field-text {
+  grid-column: 1 / -1;
+}
+
+.tag-field label {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.tag-touched {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.tag-input {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.tag-input input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.tag-input input:focus-visible,
+.tag-reset:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.tag-input input::placeholder {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.tag-field.touched input {
+  border-color: var(--accent);
+}
+
+.tag-input input[aria-invalid="true"] {
+  border-color: var(--error);
+}
+
+.tag-reset {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 0.6rem;
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.tag-error {
+  color: var(--error);
+  font-size: 0.85rem;
+}
+
+.tag-progress {
+  width: 100%;
+  margin-top: 1rem;
+  accent-color: var(--accent);
+}
+
+.tag-refused {
+  overflow-y: auto;
+  max-height: 12rem;
+  margin: 0.5rem 0 0;
+  padding-left: 1.2rem;
+  overflow-wrap: anywhere;
+}
+
 /* --- Music: tabs, albums grid and album page (KAN-4) -------------------- */
 
 .view-tabs {

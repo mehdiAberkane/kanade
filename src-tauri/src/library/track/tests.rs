@@ -218,7 +218,7 @@ fn a_file_too_large_is_not_read() {
 
 /// The tone MP3 behind an ID3v2.4 tag made of `frames` (id, body), written
 /// by hand: lofty itself refuses to write an item over ALLOCATION_LIMIT.
-fn mp3_with_id3(frames: &[(&[u8; 4], Vec<u8>)]) -> Vec<u8> {
+pub(crate) fn mp3_with_id3(frames: &[(&[u8; 4], Vec<u8>)]) -> Vec<u8> {
     let syncsafe = |n: usize| {
         let n = u32::try_from(n).unwrap();
         [n >> 21, n >> 14, n >> 7, n].map(|b| u8::try_from(b & 0x7F).unwrap())

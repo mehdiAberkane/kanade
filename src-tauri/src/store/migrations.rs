@@ -14,7 +14,7 @@ use rusqlite::Connection;
 use super::{StoreError, user_version};
 
 /// The version the steps below lead to.
-pub const LATEST_VERSION: i32 = 8;
+pub const LATEST_VERSION: i32 = 9;
 
 struct Migration {
     version: i32,
@@ -143,6 +143,26 @@ ALTER TABLE tracks ADD COLUMN rating INTEGER NOT NULL DEFAULT 0;",
         sql: "
 ALTER TABLE libraries ADD COLUMN exclusions TEXT;
 ALTER TABLE tracks ADD COLUMN excluded_ms INTEGER;",
+    },
+    // KAN-7: the changes of tags written into the files, and for each file
+    // the values it held and the ones written (JSON of tag_write::Values),
+    // to undo a change. A track that leaves the index leaves the journal.
+    Migration {
+        version: 9,
+        sql: "
+CREATE TABLE tag_changes (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    done_ms   INTEGER NOT NULL,
+    undone_ms INTEGER
+);
+CREATE TABLE tag_edits (
+    change_id INTEGER NOT NULL REFERENCES tag_changes (id) ON DELETE CASCADE,
+    track_id  INTEGER NOT NULL REFERENCES tracks (id) ON DELETE CASCADE,
+    before    TEXT NOT NULL,
+    after     TEXT NOT NULL,
+    PRIMARY KEY (change_id, track_id)
+);
+CREATE INDEX tag_edits_track ON tag_edits (track_id);",
     },
 ];
 
@@ -350,6 +370,34 @@ mod tests {
             .query_row("SELECT excluded_ms FROM tracks", [], |r| r.get(0))
             .unwrap();
         assert_eq!((exclusions, excluded), (None, None));
+    }
+
+    #[test]
+    fn step_9_starts_an_empty_journal_of_tag_changes() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        migrate_to(&mut conn, 8).unwrap();
+        conn.execute_batch(
+            "INSERT INTO tracks (path, size, modified_ms, format, has_cover)
+             VALUES ('D:\\Musique\\a.flac', 1, 1, 'FLAC', 0);",
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let changes: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tag_changes", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(changes, 0);
+        conn.execute_batch(
+            "INSERT INTO tag_changes (done_ms) VALUES (1);
+             INSERT INTO tag_edits (change_id, track_id, before, after)
+             SELECT 1, id, '{}', '{}' FROM tracks;
+             DELETE FROM tracks;",
+        )
+        .unwrap();
+        let edits: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tag_edits", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(edits, 0, "the track's journal goes with it");
     }
 
     #[test]
