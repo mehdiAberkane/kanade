@@ -180,6 +180,50 @@ it("keeps the theme and the zoom chosen, in the window too, after a restart", as
   );
 });
 
+/** The heart and the stars of the row of track `id`, as the list shows them. */
+function marksOf(id) {
+  return kanade.run(
+    `const row = document.getElementById("track-" + arguments[0]);
+    return row && {
+      favorite: row.querySelector('[aria-label="Favori"]').getAttribute("aria-pressed"),
+      stars: row.querySelectorAll('.stars [aria-pressed="true"]').length,
+    };`,
+    id,
+  );
+}
+
+// KAN-32: a favourite and a rating set from the list are kept by the Rust
+// side, on the track, and shown again after a restart.
+it("keeps a favourite and a rating set from the list after a restart", async () => {
+  await launch();
+  await allTracks();
+  const first = '//div[@role="row"][@aria-rowindex="2"]';
+  const id = await kanade.run(
+    `return document.querySelector('[role="row"][aria-rowindex="2"]').id.replace("track-", "");`,
+  );
+  // Selected, the row shows its heart; the 4 key rates the selection.
+  await kanade.click(`${first}//div[@role="gridcell"][1]`);
+  await kanade.type('//div[@role="grid"]', "4");
+  await kanade.click(`${first}//button[@aria-label="Favori"]`);
+  await waitFor(
+    () =>
+      kanade.run(
+        `return window.__TAURI_INTERNALS__.invoke("tracks_list").then((rows) => {
+          const row = rows.find((r) => String(r[0]) === arguments[0]);
+          return row[21] === true && row[22] === 4;
+        });`,
+        id,
+      ),
+    "the favourite and the rating kept in the database",
+  );
+  expect(await marksOf(id)).toEqual({ favorite: "true", stars: 4 });
+
+  await kanade.quit();
+  await launch();
+  await allTracks();
+  expect(await marksOf(id)).toEqual({ favorite: "true", stars: 4 });
+});
+
 // KAN-27: a file copied into the library's folder while Kanade is open
 // comes into the list by itself, through the watch of the folder.
 it("shows a file copied into the library while it is open", async () => {
