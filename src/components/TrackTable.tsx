@@ -19,6 +19,7 @@ import {
 import { ColumnsMenu } from "./ColumnsMenu";
 import { TrackMenu } from "./TrackMenu";
 import { MAX_RATING, ratingText, useMarks, type Marker } from "../lib/marks";
+import { usePlayback } from "../lib/player";
 import { useRowHeight } from "../lib/useAppearance";
 
 /** Every row has this height: the table draws only the rows on screen. */
@@ -69,6 +70,10 @@ function MarkButton({
       onClick={(event) => {
         event.stopPropagation();
         onPress();
+      }}
+      // A heart clicked twice is not a track to play.
+      onDoubleClick={(event) => {
+        event.stopPropagation();
       }}
     >
       {children}
@@ -134,6 +139,7 @@ export function TrackTable({
 }: Props) {
   const rowHeight = useRowHeight("track");
   const mark = useMarks();
+  const playback = usePlayback();
   const scroller = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [height, setHeight] = useState(FALLBACK_HEIGHT);
@@ -237,6 +243,21 @@ export function TrackTable({
     setMenu({ x, y, focus, tracks: chosen.length > 0 ? chosen : [focus] });
   }
 
+  /** The tracks to play: the selection, else the one with the focus. */
+  function toPlay(): number[] {
+    if (selected.length > 0) return selected.map((t) => t.id);
+    return focusIndex >= 0 ? [tracks[focusIndex].id] : [];
+  }
+
+  /**
+   * A row double-clicked plays alone: its first click has made it the
+   * selection. Enter plays a selection of several.
+   */
+  function onDoubleClick(event: MouseEvent) {
+    const index = rowAt(event);
+    if (index >= 0) playback?.play([tracks[index].id], false);
+  }
+
   function onContextMenu(event: MouseEvent) {
     const index = rowAt(event);
     if (index < 0) return;
@@ -279,6 +300,10 @@ export function TrackTable({
       }
       const box = event.currentTarget.getBoundingClientRect();
       openMenu(box.left + 24, box.top + rowHeight * (here + 2) - scrollTop, tracks[here], next);
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      const ids = toPlay();
+      if (playback && ids.length > 0) playback.play(ids, false);
     } else if (event.key === " ") {
       event.preventDefault();
       select(
@@ -352,6 +377,7 @@ export function TrackTable({
         }}
         onKeyDown={onKeyDown}
         onClick={onClick}
+        onDoubleClick={onDoubleClick}
         onContextMenu={onContextMenu}
       >
         <div className="track-head" role="rowgroup" style={{ width }}>

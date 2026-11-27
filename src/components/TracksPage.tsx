@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { cardState, formatNumber, type Settings } from "../lib/libraries";
 import { MarksContext } from "../lib/marks";
+import { onlineQuestion, PlayerContext } from "../lib/player";
+import { usePlayer } from "../lib/usePlayer";
 import {
   filterCount,
   matcher,
@@ -46,6 +48,7 @@ export function TracksPage({
   const [tab, setTab] = useState<Tab>("tracks");
   const { libraries } = useLibraries();
   const { tracks, error, mark, markError } = useTracks();
+  const player = usePlayer();
   const news = useWatchNews();
   const { view, update } = useTrackView();
   const { add, adding, refusal } = useAddLibrary();
@@ -287,6 +290,25 @@ export function TracksPage({
             Impossible de lire les morceaux : {error}
           </p>
         )}
+        {player.asking && (
+          <div className="notice play-ask" role="alertdialog" aria-label="Fichiers sur OneDrive">
+            <span>{onlineQuestion(player.asking.online)}</span>
+            <button type="button" className="btn" onClick={player.asking.confirm}>
+              Les lire
+            </button>
+            <button type="button" className="btn" onClick={player.asking.cancel}>
+              Annuler
+            </button>
+          </div>
+        )}
+        {player.status && (
+          <p
+            className={`status ${player.status.error ? "status-error" : "status-info"}`}
+            role={player.status.error ? "alert" : "status"}
+          >
+            {player.status.text}
+          </p>
+        )}
         {markError && (
           <p className="status status-error" role="alert">
             Favori ou note non enregistré : {markError}
@@ -303,7 +325,9 @@ export function TracksPage({
           </p>
         )}
         <div className="view-panel" id="view-panel" role="tabpanel" aria-labelledby={`tab-${tab}`}>
-          <MarksContext.Provider value={mark}>{main}</MarksContext.Provider>
+          <PlayerContext.Provider value={player.playback}>
+            <MarksContext.Provider value={mark}>{main}</MarksContext.Provider>
+          </PlayerContext.Provider>
         </div>
       </section>
     </div>

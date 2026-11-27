@@ -90,6 +90,15 @@ describe("TrackTable", () => {
     expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Titre"]);
   });
 
+  it("plays nothing outside the music's page, which gives the player", async () => {
+    render(table([track(1, "A")]));
+    const grid = screen.getByRole("grid");
+    await userEvent.dblClick(screen.getAllByRole("row")[1]);
+    grid.focus();
+    await userEvent.keyboard("{Enter}");
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
   it("opens the menu on the focused track even once unselected", async () => {
     render(table([track(1, "A"), track(2, "B")]));
     const grid = screen.getByRole("grid");

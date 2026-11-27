@@ -15,6 +15,7 @@ import {
   type MockLibraries,
 } from "./mockLibraries";
 import type { LibraryView } from "../lib/libraries";
+import type { Players } from "../lib/player";
 import type { TrackRow } from "../lib/tracks";
 
 let libraries: MockLibraries | undefined;
@@ -322,6 +323,69 @@ describe("fake tracks", () => {
       groupFeaturing: true,
     });
     expect(await invoke("backup_before_update")).toBeNull();
+  });
+});
+
+describe("the fake players", () => {
+  it("lists, chooses, picks and tries a player, and plays (KAN-45)", async () => {
+    setup();
+    const list = await invoke<Players>("players_list");
+    expect(list.detected.map((p) => p.name)).toEqual(["AIMP", "foobar2000", "VLC"]);
+    expect(list.chosen).toMatchObject({ kind: "default", opensWith: { name: "VLC" } });
+    expect(await invoke("player_try")).toBe("VLC");
+    const aimp = list.detected[0].id;
+    expect(await invoke<Players>("player_set", { id: aimp })).toMatchObject({
+      chosen: { kind: "program", player: { name: "AIMP" } },
+    });
+    expect(await invoke("player_try")).toBe("AIMP");
+    await expect(invoke("player_set", { id: "nope" })).rejects.toEqual({
+      code: "player_not_found",
+    });
+    const picked = await invoke<Players>("player_pick");
+    expect(picked.chosen).toMatchObject({ player: { name: "MusicBee" } });
+    const icon = await invoke<Uint8Array>("player_icon", { id: aimp });
+    expect(new TextDecoder().decode(icon)).toMatch(/^<svg/);
+    await expect(invoke("player_icon", { id: "nope" })).rejects.toEqual({
+      code: "player_not_found",
+    });
+    expect(await invoke("player_set", { id: null })).toMatchObject({
+      chosen: { kind: "default" },
+    });
+
+    const rows = await invoke<TrackRow[]>("tracks_list");
+    const here = rows.find((r) => r[1] === 1 && r[2] === 0) as TrackRow;
+    const cloud = rows.find((r) => r[1] === 2 && r[2] === 0) as TrackRow;
+    const gone = rows.find((r) => r[2] === 2) as TrackRow;
+    expect(await invoke("tracks_play", { ids: [here[0]] })).toMatchObject({
+      launched: true,
+      player: "VLC",
+    });
+    expect(await invoke("tracks_play", { ids: [here[0], cloud[0]] })).toMatchObject({
+      launched: false,
+      online: 1,
+    });
+    expect(
+      await invoke("tracks_play", { ids: [cloud[0]], allowOnline: true, enqueue: true }),
+    ).toMatchObject({ launched: true });
+    expect(await invoke("tracks_play", { ids: rows.slice(0, 600).map((r) => r[0]) })).toMatchObject(
+      {
+        playlist: true,
+      },
+    );
+    await expect(invoke("tracks_play", { ids: [gone[0]] })).rejects.toMatchObject({
+      code: "file_gone",
+    });
+    await expect(invoke("tracks_play", { ids: [-1] })).rejects.toEqual({
+      code: "track_not_found",
+    });
+    await expect(invoke("tracks_play", {})).resolves.toMatchObject({ launched: true });
+    expect(await invoke("track_open_with", { id: here[0] })).toBeNull();
+    await expect(invoke("track_open_with", { id: gone[0] })).rejects.toMatchObject({
+      code: "file_gone",
+    });
+    await expect(invoke("track_open_with", { id: -1 })).rejects.toEqual({
+      code: "track_not_found",
+    });
   });
 });
 

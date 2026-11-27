@@ -714,6 +714,125 @@ describe("Favourites and ratings", () => {
   });
 });
 
+describe("Playing with a player (KAN-45)", () => {
+  const played = (fields: Record<string, unknown> = {}) => ({
+    launched: true,
+    player: "VLC",
+    online: 0,
+    playlist: false,
+    onlyFirst: false,
+    fellBack: false,
+    ...fields,
+  });
+  const plays = (calls: { cmd: string; args: InvokeArgs | undefined }[]) =>
+    calls.filter((c) => c.cmd === "tracks_play").map((c) => c.args);
+  const last = <T,>(list: T[]) => list[list.length - 1];
+  const idOf = (app: App, title: string) =>
+    Number(app.screen.getByRole("row", { name: new RegExp(title) }).id.replace("track-", ""));
+
+  it("plays a row double-clicked, the selection with Enter, and from the menu", async () => {
+    const { calls } = backend({
+      overrides: { tracks_play: () => played(), track_open_with: () => null },
+    });
+    const app = await renderApp();
+    const table = await grid(app);
+    const rowOf = (title: string) => app.screen.getByRole("row", { name: new RegExp(title) });
+    const andy = idOf(app, "Andy");
+    await app.user.dblClick(rowOf("Andy"));
+    expect(plays(calls)).toEqual([{ ids: [andy], enqueue: false, allowOnline: false }]);
+
+    // A heart clicked twice plays nothing.
+    await app.user.dblClick(app.within(rowOf("Andy")).getByRole("button", { name: "Favori" }));
+    expect(plays(calls)).toHaveLength(1);
+
+    await app.user.click(rowOf("Yesterday"));
+    await app.user.keyboard("{Shift>}");
+    await app.user.click(rowOf("Andy"));
+    await app.user.keyboard("{/Shift}");
+    table.focus();
+    await app.user.keyboard("{Enter}");
+    expect((plays(calls)[1] as { ids: number[] }).ids).toHaveLength(3);
+    // The focus alone, once unselected: Enter plays it.
+    await app.user.keyboard("{ArrowDown}{Control>} {/Control}{Enter}");
+    expect((plays(calls)[2] as { ids: number[] }).ids).toHaveLength(1);
+    // A double click away from the rows plays nothing.
+    await app.user.dblClick(app.screen.getAllByRole("columnheader")[0]);
+    expect(plays(calls)).toHaveLength(3);
+
+    const menu = async () => {
+      await app.user.pointer({ keys: "[MouseRight]", target: rowOf("Yesterday") });
+      return app.within(app.screen.getByRole("menu"));
+    };
+    await app.user.click((await menu()).getByRole("menuitem", { name: "Lire avec VLC" }));
+    await app.user.click(
+      (await menu()).getByRole("menuitem", { name: "Ajouter à la file de VLC" }),
+    );
+    expect(last(plays(calls))).toMatchObject({ enqueue: true });
+    await app.user.click((await menu()).getByRole("menuitem", { name: "Ouvrir avec…" }));
+    expect(calls.find((c) => c.cmd === "track_open_with")?.args).toEqual({
+      id: idOf(app, "Yesterday"),
+    });
+  });
+
+  it("asks before files only in the cloud, and says what a play did", async () => {
+    const { calls } = backend({
+      overrides: {
+        tracks_play: (args) =>
+          (args as { allowOnline: boolean }).allowOnline
+            ? played({ onlyFirst: true })
+            : played({ launched: false, online: 2, player: "" }),
+      },
+    });
+    const app = await renderApp();
+    await grid(app);
+    const rowOf = (title: string) => app.screen.getByRole("row", { name: new RegExp(title) });
+    await app.user.dblClick(rowOf("Andy"));
+    const ask = await app.screen.findByRole("alertdialog", { name: "Fichiers sur OneDrive" });
+    expect(ask.textContent).toMatch(/^2 morceaux ne sont que sur OneDrive/);
+    await app.user.click(app.within(ask).getByRole("button", { name: "Annuler" }));
+    expect(app.screen.queryByRole("alertdialog")).toBeNull();
+    await app.user.dblClick(rowOf("Andy"));
+    await app.user.click(await app.screen.findByRole("button", { name: "Les lire" }));
+    expect(await app.screen.findByText(/^Le lecteur de Windows ne lit qu'un morceau/)).toBeTruthy();
+    expect(last(plays(calls))).toMatchObject({ allowOnline: true });
+  });
+
+  it("says why nothing played", async () => {
+    backend({
+      overrides: {
+        tracks_play: refuse({ code: "file_gone", name: "Andy.flac" }),
+        track_open_with: refuse({ code: "launch_failed", message: "refusé" }),
+      },
+    });
+    const app = await renderApp();
+    await grid(app);
+    const rowOf = (title: string) => app.screen.getByRole("row", { name: new RegExp(title) });
+    await app.user.dblClick(rowOf("Andy"));
+    expect((await app.screen.findByRole("alert")).textContent).toBe(
+      "Ce fichier n'est plus sur le disque : Andy.flac. Rien n'a été lancé.",
+    );
+    await app.user.pointer({ keys: "[MouseRight]", target: rowOf("Andy") });
+    await app.user.click(app.screen.getByRole("menuitem", { name: "Ouvrir avec…" }));
+    expect(await app.screen.findByText("Le lecteur n'a pas démarré : refusé")).toBeTruthy();
+  });
+
+  it("names Windows' own player when the players cannot be read", async () => {
+    backend({ overrides: { players_list: refuse({ code: "database", message: "fermée" }) } });
+    const app = await renderApp();
+    const table = await grid(app);
+    table.focus();
+    // Nothing selected nor focused: Enter plays nothing.
+    await app.user.keyboard("{Enter}");
+    await app.user.pointer({
+      keys: "[MouseRight]",
+      target: app.screen.getByRole("row", { name: /Andy/ }),
+    });
+    const menu = app.within(app.screen.getByRole("menu"));
+    expect(menu.getByRole("menuitem", { name: "Lire avec le lecteur de Windows" })).toBeTruthy();
+    expect(menu.queryByRole("menuitem", { name: /^Ajouter à la file/ })).toBeNull();
+  });
+});
+
 describe("Track menu", () => {
   it("copies the paths and shows a track in the Explorer", async () => {
     const { calls } = backend({ overrides: { track_reveal: () => null } });
@@ -722,7 +841,8 @@ describe("Track menu", () => {
     const rowOf = (title: string) => app.screen.getByRole("row", { name: new RegExp(title) });
     await app.user.pointer({ keys: "[MouseRight]", target: rowOf("Andy") });
     const menu = app.within(app.screen.getByRole("menu"));
-    expect(document.activeElement?.textContent).toBe("Ajouter aux favoris");
+    // First, the player of the fake backend (KAN-45).
+    expect(document.activeElement?.textContent).toBe("Lire avec VLC");
     await app.user.click(menu.getByRole("menuitem", { name: "Copier le chemin" }));
     expect(await navigator.clipboard.readText()).toBe("D:\\Musique\\Andy.flac");
     expect(app.screen.queryByRole("menu")).toBeNull();
@@ -751,11 +871,12 @@ describe("Track menu", () => {
     await app.user.keyboard("{ArrowUp}");
     expect(document.activeElement?.textContent).toBe("Copier le chemin");
     await app.user.keyboard("{ArrowUp}");
-    expect(document.activeElement?.textContent).toBe("Afficher dans l'Explorateur");
+    expect(document.activeElement?.textContent).toBe("Ouvrir avec…");
     await app.user.keyboard("{ArrowDown}");
     expect(document.activeElement?.textContent).toBe("Copier le chemin");
     // Down from the first entry, then right, along the stars.
-    await app.user.keyboard("{ArrowDown}{ArrowDown}{ArrowRight}");
+    // Down past the player's two entries and the favourite, then right.
+    await app.user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowRight}");
     expect(document.activeElement?.getAttribute("aria-label")).toBe("2 étoiles");
     await app.user.keyboard("{ArrowLeft}");
     expect(document.activeElement?.getAttribute("aria-label")).toBe("1 étoile");

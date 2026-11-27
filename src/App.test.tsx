@@ -333,6 +333,79 @@ describe("Favourites and ratings in a file", () => {
   });
 });
 
+describe("Lecture", () => {
+  it("chooses the player, picks another program, and tries it (KAN-45)", async () => {
+    const { calls } = backend();
+    const { screen, user, waitFor, within } = await openSettings();
+    const group = await screen.findByRole("radiogroup", { name: "Lire avec" });
+    const choice = (name: RegExp) => within(group).getByRole<HTMLInputElement>("radio", { name });
+    await waitFor(() => {
+      expect(choice(/^Lecteur par défaut de Windows/).checked).toBe(true);
+    });
+    expect(group.textContent).toContain(
+      "Aujourd'hui VLC : C:\\Program Files\\VideoLAN\\VLC\\vlc.exe",
+    );
+    await user.click(choice(/^foobar2000/));
+    await waitFor(() => {
+      expect(choice(/^foobar2000/).checked).toBe(true);
+    });
+    await user.click(screen.getByRole("button", { name: "Autre programme…" }));
+    await waitFor(() => {
+      expect(choice(/^MusicBee/).checked).toBe(true);
+    });
+    await user.click(screen.getByRole("button", { name: "Essayer" }));
+    expect(await screen.findByText("MusicBee démarre.")).toBeTruthy();
+    await user.click(choice(/^Lecteur par défaut de Windows/));
+    await waitFor(() => {
+      expect(choice(/^Lecteur par défaut de Windows/).checked).toBe(true);
+    });
+    expect(calls.filter((c) => c === "player_set")).toHaveLength(2);
+  });
+
+  it("says when the player chosen is gone, and why a choice was refused", async () => {
+    const musicbee = {
+      id: "musicbee",
+      name: "MusicBee",
+      path: String.raw`C:\Program Files (x86)\MusicBee\MusicBee.exe`,
+      enqueue: true,
+    };
+    backend("none", VERSION, "ready", {
+      players_list: () => ({
+        chosen: { kind: "program", player: musicbee, available: false },
+        detected: [],
+      }),
+      player_pick: () => null,
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the Rust side rejects with the error object
+      player_set: () => Promise.reject({ code: "player_not_found" }),
+    });
+    const { screen, user, within } = await openSettings();
+    expect(await screen.findByText(/^MusicBee est introuvable/)).toBeTruthy();
+    const group = screen.getByRole("radiogroup", { name: "Lire avec" });
+    // Not found again, still offered: it is the one chosen.
+    expect(within(group).getByRole<HTMLInputElement>("radio", { name: /^MusicBee/ }).checked).toBe(
+      true,
+    );
+    expect(group.textContent).toContain("Celui qui ouvre les fichiers dans l'Explorateur");
+    await user.click(screen.getByRole("button", { name: "Autre programme…" }));
+    await user.click(within(group).getByRole("radio", { name: /^Lecteur par défaut/ }));
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Ce lecteur est introuvable : il a peut-être été désinstallé ou déplacé.",
+    );
+  });
+
+  it("says when the players cannot be read", async () => {
+    backend("none", VERSION, "ready", {
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the Rust side rejects with the error object
+      players_list: () => Promise.reject({ code: "database", message: "fermée" }),
+    });
+    const { screen } = await openSettings();
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Erreur de la base de Kanade : fermée",
+    );
+    expect(screen.getByRole("button", { name: "Essayer" })).toHaveProperty("disabled", true);
+  });
+});
+
 describe("Database banner", () => {
   it("stays hidden when the database opened normally", async () => {
     const { calls } = backend();

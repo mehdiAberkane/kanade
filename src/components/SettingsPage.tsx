@@ -3,6 +3,7 @@ import { useSettings } from "../lib/useSettings";
 import { useUpdater } from "../lib/useUpdater";
 import { LibrarySettings } from "./LibrarySettings";
 import { MarksSettings } from "./MarksSettings";
+import { PlayerSettings } from "./PlayerSettings";
 
 interface Props {
   /** Installed version, from the Rust side; empty until it answers. */
@@ -27,6 +28,8 @@ export function SettingsPage({ version, onInstall }: Props) {
       )}
 
       <LibrarySettings settings={settings} save={save} />
+
+      <PlayerSettings />
 
       <MarksSettings />
 

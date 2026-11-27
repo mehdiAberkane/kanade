@@ -18,6 +18,7 @@ import type { AlbumView } from "../lib/albums";
 import { AUDIO_EXTENSIONS, folderUnder, leftOut, type Exclusions } from "../lib/exclusions";
 import type { Mark } from "../lib/marks";
 import type { TrackRow, TrackView } from "../lib/tracks";
+import { createMockPlayers, NOT_MINE as NOT_A_PLAYER } from "./mockPlayers";
 import { mockTracks } from "./mockTracks";
 
 /** ?libraries=empty starts without a library; sample ones otherwise. */
@@ -333,6 +334,7 @@ export function createMockLibraries({
     }
     return changed;
   }
+  const players = createMockPlayers(rowById);
   const queue: Job[] = [];
   let running: Running | null = null;
 
@@ -462,6 +464,8 @@ export function createMockLibraries({
       settings?: Settings;
       view?: TrackView;
     };
+    const played = players.handle(cmd, args);
+    if (played !== NOT_A_PLAYER) return played;
     switch (cmd) {
       case "libraries_list":
         // By name, as the Rust side lists them; the tracks left out not counted.
