@@ -731,6 +731,29 @@ fn says_why_lofty_could_not_read_a_file() {
     );
 }
 
+/// A file without tags: its first title written, then undone. The block
+/// left empty is not written at all, which loses nothing.
+#[test]
+fn undoes_the_first_tag_of_a_file_without_any() {
+    let dir = tempfile::tempdir().unwrap();
+    for (name, _) in FIXTURES {
+        let path = dir.path().join(name);
+        fs::copy(fixture(name), &path).unwrap();
+        let done = written(&path, &edit(&[(Title, "Written by Kanade")]));
+        assert_eq!(
+            read(&path).unwrap().title.as_deref(),
+            Some("Written by Kanade"),
+            "{name}"
+        );
+        let undo = Undo {
+            before: &done.before,
+            after: &done.after,
+        };
+        written(&path, &undo);
+        assert_eq!(read(&path).unwrap().title, None, "{name}");
+    }
+}
+
 #[test]
 fn does_not_undo_a_field_changed_since() {
     let dir = tempfile::tempdir().unwrap();
@@ -746,4 +769,37 @@ fn does_not_undo_a_field_changed_since() {
     assert_eq!(write(&path, stamp, &undo), Err(Refusal::Changed));
     assert_eq!(read(&path).unwrap().title.as_deref(), Some("Theirs"));
     assert_eq!(stamp_of(&path), stamp);
+}
+
+/// Files as an encoder leaves them (VLC here): an ENCODER field in the Ogg
+/// ones, which lofty would turn into the vendor string. Both kept.
+#[test]
+fn keeps_the_encoder_and_the_vendor_of_vorbis_comments() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["tone.ogg", "tone.opus"] {
+        let path = dir.path().join(name);
+        fs::copy(fixture(name), &path).unwrap();
+        let comments = |path: &Path| {
+            let tagged = tagged(path);
+            let file = lofty::ogg::VorbisFile::read_from(
+                &mut fs::File::open(path).unwrap(),
+                parse_options(ParsingMode::BestAttempt),
+            );
+            (
+                tagged
+                    .primary_tag()
+                    .unwrap()
+                    .get_string(ItemKey::EncoderSoftware)
+                    .map(str::to_owned),
+                file.ok().map(|f| f.vorbis_comments().vendor().to_owned()),
+            )
+        };
+        let before = comments(&path);
+        written(&path, &edit(&[(Title, "Written by Kanade")]));
+        assert_eq!(comments(&path), before, "{name}");
+        assert_eq!(
+            read(&path).unwrap().title.as_deref(),
+            Some("Written by Kanade")
+        );
+    }
 }

@@ -23,15 +23,18 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 
 use lofty::aac::AacFile;
-use lofty::ape::ApeFile;
+use lofty::ape::{ApeFile, ApeTag};
 use lofty::config::{ParseOptions, ParsingMode, WriteOptions};
 use lofty::file::{FileType, TaggedFile};
 use lofty::flac::FlacFile;
-use lofty::iff::aiff::AiffFile;
-use lofty::iff::wav::WavFile;
-use lofty::mp4::Mp4File;
+use lofty::id3::v1::Id3v1Tag;
+use lofty::id3::v2::Id3v2Tag;
+use lofty::iff::aiff::{AiffFile, AiffTextChunks};
+use lofty::iff::wav::{RiffInfoList, WavFile};
+use lofty::mp4::{Ilst, Mp4File};
 use lofty::mpeg::MpegFile;
 use lofty::musepack::MpcFile;
+use lofty::ogg::tag::VorbisComments;
 use lofty::ogg::{OpusFile, SpeexFile, VorbisFile};
 use lofty::prelude::*;
 use lofty::probe::Probe;
@@ -620,9 +623,14 @@ fn retyped<'a>(tag_type: TagType, items: impl Iterator<Item = &'a TagItem>) -> T
     tag
 }
 
+/// A block of tags with values written in.
+trait Edit: Sized {
+    fn edited(self, values: &Values) -> Self;
+}
+
 /// `tag` with `values` written in: lofty keeps aside what a generic `Tag`
 /// cannot hold, and puts it back.
-fn edited<T>(tag: T, values: &Values) -> T
+fn split_edited<T>(tag: T, values: &Values) -> T
 where
     T: SplitTag,
     T::Remainder: MergeTag<Merged = T>,
@@ -630,6 +638,46 @@ where
     let (rest, mut generic) = tag.split_tag();
     apply(&mut generic, values);
     rest.merge_tag(generic)
+}
+
+macro_rules! split_edit {
+    ($($tag:ty),*) => {
+        $(
+            impl Edit for $tag {
+                fn edited(self, values: &Values) -> Self {
+                    split_edited(self, values)
+                }
+            }
+        )*
+    };
+}
+
+split_edit!(
+    Id3v2Tag,
+    Id3v1Tag,
+    ApeTag,
+    Ilst,
+    RiffInfoList,
+    AiffTextChunks
+);
+
+/// lofty turns an ENCODER field into the vendor string of Vorbis comments,
+/// and the vendor string is lost: both are kept aside here.
+impl Edit for VorbisComments {
+    fn edited(mut self, values: &Values) -> Self {
+        let vendor = self.vendor().to_owned();
+        let encoders: Vec<String> = self.remove("ENCODER").collect();
+        let mut edited = split_edited(self, values);
+        edited.set_vendor(vendor);
+        for encoder in encoders {
+            edited.push("ENCODER".to_owned(), encoder);
+        }
+        edited
+    }
+}
+
+fn edited<T: Edit>(tag: T, values: &Values) -> T {
+    tag.edited(values)
 }
 
 /// Sets each item of `values` in `tag`. An item the block cannot hold
@@ -672,11 +720,12 @@ fn check(before: &TaggedFile, after: &TaggedFile, values: &Values) -> Result<(),
             message: format!("the copy written differs: {what}"),
         })
     };
+    // Not the bitrate: lofty estimates it from the file's size (Opus), which
+    // the tags change. The audio bytes themselves are compared by the tests.
     let audio = |file: &TaggedFile| {
         let p = file.properties();
         (
             p.duration(),
-            p.audio_bitrate(),
             p.sample_rate(),
             p.bit_depth(),
             p.channels(),
@@ -689,6 +738,11 @@ fn check(before: &TaggedFile, after: &TaggedFile, values: &Values) -> Result<(),
     let touched = values.touched();
     for tag in before.tags() {
         let Some(written) = after.tag(tag.tag_type()) else {
+            // A block left with nothing (its last field removed) is not
+            // written at all: nothing of it is lost.
+            if kept_items(tag, &touched).is_empty() && tag.pictures().is_empty() {
+                continue;
+            }
             return differs("a block of tags is missing");
         };
         if !same(kept_items(tag, &touched), kept_items(written, &touched)) {
