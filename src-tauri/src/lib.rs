@@ -2,6 +2,7 @@
 // the memory-safety risks stay in the crates it depends on.
 #![forbid(unsafe_code)]
 
+mod audio;
 mod background;
 mod commands;
 #[cfg(feature = "e2e")]
