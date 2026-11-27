@@ -337,7 +337,8 @@ fn the_queue_changes_while_it_plays() {
     e.play(ids(&[1, 2, 3]), 0);
     e.enqueue(&ids(&[7]), true);
     e.enqueue(&ids(&[8]), false);
-    assert_eq!(e.state().queue, ids(&[1, 7, 2, 3, 8]));
+    assert_eq!(e.queue(), ids(&[1, 7, 2, 3, 8]));
+    assert_eq!(e.state().queue_version, 3);
     out.at(178_000);
     e.tick();
     assert_eq!(out.queued(), ["1.flac", "7.flac"]);
@@ -352,7 +353,7 @@ fn the_queue_changes_while_it_plays() {
     assert_eq!(current(&e), Some(2));
     assert!(e.playing());
     e.remove(3);
-    assert_eq!(e.state().queue, ids(&[2, 3, 8]));
+    assert_eq!(e.queue(), ids(&[2, 3, 8]));
 
     // Paused, it stays paused on the next one.
     e.pause();
@@ -374,7 +375,7 @@ fn the_queue_changes_while_it_plays() {
 
     e.play(ids(&[1, 2]), 0);
     e.clear();
-    assert_eq!((e.state().queue.len(), e.state().current), (0, None));
+    assert_eq!((e.state().queue_length, e.state().current), (0, None));
     assert!(out.queued().is_empty());
 }
 

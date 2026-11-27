@@ -1,6 +1,7 @@
-// Playing with a player installed on Windows (KAN-45): the Rust side finds
-// the players (player/registry.rs), keeps the one chosen and starts it with
-// the tracks' files, named here by their id only. The lists reach it through
+// Which player plays the tracks: Kanade's own (KAN-8, lib/audio.ts), or a
+// player installed on Windows (KAN-45): the Rust side finds the players
+// (player/registry.rs), keeps the one chosen and starts it with the tracks'
+// files, named here by their id only. The lists reach it through
 // PlayerContext, which the music's page gives.
 import { createContext, useContext } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -18,6 +19,8 @@ export interface Player {
 }
 
 export type Chosen =
+  /** Kanade's own; `opensWith`, what Windows opens an MP3 with, for « Lire avec ». */
+  | { kind: "builtin"; opensWith: Player | null }
   /** Windows' own; `opensWith`, what it opens an MP3 with (none for an app of the Store). */
   | { kind: "default"; opensWith: Player | null }
   /** A program; not `available` once uninstalled or moved. */
@@ -45,16 +48,43 @@ export interface Outcome {
 
 export const WINDOWS_PLAYER = "le lecteur de Windows";
 
-/** The player the menus name, and whether it can add to what it plays. */
-export function playerInUse(players: Players | null): { name: string; enqueue: boolean } {
-  const chosen = players?.chosen;
-  if (chosen?.kind === "program" && chosen.available) {
-    return { name: chosen.player.name, enqueue: chosen.player.enqueue };
+/** The id the Rust side gives Kanade's own player (commands.rs: BUILTIN). */
+export const BUILTIN = "builtin";
+
+interface InUse {
+  /** The player the menus name. */
+  name: string;
+  /** It can add tracks to what it plays. */
+  enqueue: boolean;
+  /** Kanade's own plays (KAN-8). */
+  builtin: boolean;
+  /** With Kanade's own: what Windows opens a file with, for « Lire avec ». */
+  other: string | null;
+}
+
+/** The player the menus name, and what it can do. Kanade's own until told. */
+export function playerInUse(players: Players | null): InUse {
+  const chosen = players?.chosen ?? { kind: "builtin", opensWith: null };
+  if (chosen.kind === "builtin") {
+    return {
+      name: "Kanade",
+      enqueue: true,
+      builtin: true,
+      other: chosen.opensWith?.name ?? WINDOWS_PLAYER,
+    };
   }
-  const opensWith = chosen?.kind === "default" ? chosen.opensWith : null;
+  if (chosen.kind === "program" && chosen.available) {
+    return {
+      name: chosen.player.name,
+      enqueue: chosen.player.enqueue,
+      builtin: false,
+      other: null,
+    };
+  }
+  const opensWith = chosen.kind === "default" ? chosen.opensWith : null;
   return opensWith
-    ? { name: opensWith.name, enqueue: opensWith.enqueue }
-    : { name: WINDOWS_PLAYER, enqueue: false };
+    ? { name: opensWith.name, enqueue: opensWith.enqueue, builtin: false, other: null }
+    : { name: WINDOWS_PLAYER, enqueue: false, builtin: false, other: null };
 }
 
 /** What to say once a play went through, when there is something to say. */
@@ -85,11 +115,20 @@ export function onlineQuestion(online: number): string {
 
 /** What the lists can ask of the player chosen. */
 export interface Playback {
-  /** « VLC », or « le lecteur de Windows ». */
+  /** « Kanade », « VLC », or « le lecteur de Windows ». */
   name: string;
   enqueue: boolean;
+  /** Kanade's own plays: « Lire ensuite », and a list played from a row. */
+  builtin: boolean;
   /** Plays these tracks, in this order, or adds them to what it plays. */
   play: (ids: number[], enqueue: boolean) => void;
+  /** Kanade's own: these tracks from the one at `start`, instead of its queue. */
+  playFrom: (ids: number[], start: number) => void;
+  /** Kanade's own: after the track playing. */
+  playNext: (ids: number[]) => void;
+  /** With Kanade's own: what Windows opens a file with, and plays these. */
+  other: string | null;
+  playWith: (ids: number[]) => void;
   /** Windows' « Ouvrir avec » box for one track. */
   openWith: (id: number) => void;
 }

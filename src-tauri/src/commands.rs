@@ -374,8 +374,8 @@ pub enum AddMode {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AudioOutcome {
-    /// Files kept online only (OneDrive), when not allowed to download:
-    /// nothing was added, the interface asks first.
+    /// The track to start is kept online only (OneDrive), and not allowed
+    /// to download: nothing was added, the interface asks first.
     pub online: usize,
     /// Tracks in a format the player does not read, left out.
     pub left_out: usize,
@@ -423,11 +423,11 @@ fn add_to_player(
         }
         return Ok(outcome);
     }
-    if !allow_online {
-        outcome.online = read
-            .iter()
-            .filter(|t| TrackFile::of(t.path.to_string_lossy().into_owned()).online_only)
-            .count();
+    // Only the track that starts is asked about: the others of a list are
+    // fetched from the cloud as their turn comes, as in any player.
+    if !allow_online && matches!(mode, AddMode::Play) {
+        let first = TrackFile::of(read[from].path.to_string_lossy().into_owned());
+        outcome.online = usize::from(first.online_only);
         if outcome.online > 0 {
             return Ok(outcome);
         }
@@ -785,13 +785,20 @@ pub fn audio_state(audio: State<'_, Audio>) -> Result<PlayerState, LibraryError>
     Ok(audio.get()?.state())
 }
 
-/// The tracks of the built-in player's queue, in its order.
+/// The tracks of the built-in player's queue, `count` from `from`, in its
+/// order: the window shows a part of a queue of 50,000 at a time.
 #[tauri::command(async)]
 pub fn audio_queue(
+    from: usize,
+    count: usize,
     libraries: State<'_, Libraries>,
     audio: State<'_, Audio>,
 ) -> Result<Vec<Playable>, LibraryError> {
-    let ids = audio.get()?.state().queue;
+    let ids = audio.get()?.read(|engine| {
+        let queue = engine.queue();
+        let from = from.min(queue.len());
+        queue[from..from.saturating_add(count).min(queue.len())].to_vec()
+    });
     libraries.get()?.queue_entries(&ids)
 }
 
@@ -1639,9 +1646,10 @@ mod tests {
         .unwrap();
         assert_eq!(outcome.left_out, 1);
         let state = audio.get().unwrap().state();
-        assert_eq!(state.queue.len(), ids.len() - 1);
+        let queue = |audio: &Audio| audio.get().unwrap().read(|e| e.queue().to_vec());
+        assert_eq!(state.queue_length, ids.len() - 1);
         assert!(state.playing);
-        assert!(!state.queue.contains(&opus));
+        assert!(!queue(&audio).contains(&opus));
 
         add_to_player(
             &libraries,
@@ -1661,10 +1669,11 @@ mod tests {
             false,
         )
         .unwrap();
-        let queue = audio.get().unwrap().state();
-        assert_eq!(queue.queue.len(), ids.len() + 1);
-        assert_eq!(queue.queue[queue.at.unwrap() + 1], ids[0]);
-        assert_eq!(queue.queue.last(), Some(&ids[0]));
+        let at = audio.get().unwrap().state().at.unwrap();
+        let after = queue(&audio);
+        assert_eq!(after.len(), ids.len() + 1);
+        assert_eq!(after[at + 1], ids[0]);
+        assert_eq!(after.last(), Some(&ids[0]));
 
         // Only an Opus: Windows' own player.
         let outcome =
@@ -1739,9 +1748,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(asked.online, 1);
-        assert!(audio.get().unwrap().state().queue.is_empty());
+        assert_eq!(audio.get().unwrap().state().queue_length, 0);
         add_to_player(&libraries, &audio, &env, (&[*flac], 0), AddMode::Play, true).unwrap();
-        assert_eq!(audio.get().unwrap().state().queue, [*flac]);
+        assert_eq!(audio.get().unwrap().read(|e| e.queue().to_vec()), [*flac]);
     }
 
     /// KAN-8: the built-in player's commands through Tauri, and its state
@@ -1849,20 +1858,29 @@ mod tests {
             control(serde_json::json!({ "action": "shuffle", "shuffle": true }))["shuffle"],
             true
         );
-        let queue = invoke(&webview, "audio_queue", serde_json::json!({})).unwrap();
-        assert_eq!(queue.as_array().unwrap().len(), readable.len());
+        let queue = invoke(
+            &webview,
+            "audio_queue",
+            serde_json::json!({ "from": 1, "count": 100 }),
+        )
+        .unwrap();
+        assert_eq!(queue.as_array().unwrap().len(), readable.len() - 1);
+        let past = invoke(
+            &webview,
+            "audio_queue",
+            serde_json::json!({ "from": 99, "count": 5 }),
+        )
+        .unwrap();
+        assert_eq!(past, serde_json::json!([]));
         assert!(queue[0]["title"].is_string());
         assert_eq!(queue[0]["skip"], serde_json::Value::Null);
         assert!(queue[0].get("path").is_none(), "no path goes to the window");
         assert_eq!(
-            control(serde_json::json!({ "action": "remove", "position": 0 }))["queue"]
-                .as_array()
-                .unwrap()
-                .len(),
+            control(serde_json::json!({ "action": "remove", "position": 0 }))["queueLength"],
             readable.len() - 1
         );
         let cleared = control(serde_json::json!({ "action": "clear" }));
-        assert_eq!(cleared["queue"], serde_json::json!([]));
+        assert_eq!(cleared["queueLength"], 0);
         assert_eq!(cleared["current"], serde_json::Value::Null);
         // Another player played: Kanade's own paused (nothing to pause here).
         let unknown = invoke(

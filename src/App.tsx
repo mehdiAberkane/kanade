@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { AppearancePage } from "./components/AppearancePage";
 import { AppearanceProvider } from "./components/AppearanceProvider";
 import { DatabaseBanner } from "./components/DatabaseBanner";
+import { NowPlaying } from "./components/NowPlaying";
 import { DropZone } from "./components/DropZone";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { HealthPage } from "./components/HealthPage";
@@ -92,6 +93,7 @@ function App() {
           {page === "appearance" && <AppearancePage />}
           {page === "settings" && <SettingsPage version={version} onInstall={confirm} />}
         </main>
+        <NowPlaying />
         <DropZone />
         <UpdateNotice onOpen={confirm} />
         {confirming && (

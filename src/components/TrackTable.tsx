@@ -250,12 +250,25 @@ export function TrackTable({
   }
 
   /**
-   * A row double-clicked plays alone: its first click has made it the
-   * selection. Enter plays a selection of several.
+   * A row double-clicked: Kanade's own player plays the list from it, as an
+   * album plays on; another player plays it alone (its first click has made
+   * it the selection). Enter plays a selection of several.
    */
   function onDoubleClick(event: MouseEvent) {
     const index = rowAt(event);
-    if (index >= 0) playback?.play([tracks[index].id], false);
+    if (index >= 0) playRow(index);
+  }
+
+  function playRow(index: number) {
+    if (!playback) return;
+    if (playback.builtin) {
+      playback.playFrom(
+        tracks.map((t) => t.id),
+        index,
+      );
+    } else {
+      playback.play([tracks[index].id], false);
+    }
   }
 
   function onContextMenu(event: MouseEvent) {
@@ -303,7 +316,8 @@ export function TrackTable({
     } else if (event.key === "Enter") {
       event.preventDefault();
       const ids = toPlay();
-      if (playback && ids.length > 0) playback.play(ids, false);
+      if (ids.length === 1) playRow(tracks.findIndex((t) => t.id === ids[0]));
+      else if (ids.length > 1) playback?.play(ids, false);
     } else if (event.key === " ") {
       event.preventDefault();
       select(

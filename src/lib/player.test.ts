@@ -32,23 +32,36 @@ afterEach(() => {
 });
 
 describe("the player in use", () => {
-  it("names the program chosen, else what Windows opens with", async () => {
+  it("names Kanade's own, the program chosen, else what Windows opens with", async () => {
     const { playerInUse, WINDOWS_PLAYER } = await fresh();
     const program = (available: boolean): Players => ({
       chosen: { kind: "program", player: vlc, available },
       detected: [vlc],
     });
-    expect(playerInUse(program(true))).toEqual({ name: "VLC", enqueue: true });
+    const other = { builtin: false, other: null };
+    expect(playerInUse(program(true))).toEqual({ name: "VLC", enqueue: true, ...other });
     // Gone: Windows' own plays.
-    expect(playerInUse(program(false))).toEqual({ name: WINDOWS_PLAYER, enqueue: false });
+    expect(playerInUse(program(false))).toEqual({
+      name: WINDOWS_PLAYER,
+      enqueue: false,
+      ...other,
+    });
     expect(playerInUse({ chosen: { kind: "default", opensWith: vlc }, detected: [] })).toEqual({
       name: "VLC",
       enqueue: true,
+      ...other,
     });
     expect(playerInUse({ chosen: { kind: "default", opensWith: null }, detected: [] }).name).toBe(
       "le lecteur de Windows",
     );
-    expect(playerInUse(null).enqueue).toBe(false);
+    // Kanade's own (KAN-8), by default too; « Lire avec » what Windows opens with.
+    expect(playerInUse({ chosen: { kind: "builtin", opensWith: vlc }, detected: [] })).toEqual({
+      name: "Kanade",
+      enqueue: true,
+      builtin: true,
+      other: "VLC",
+    });
+    expect(playerInUse(null)).toMatchObject({ builtin: true, other: WINDOWS_PLAYER });
   });
 
   it("says what a play did when there is something to say", async () => {

@@ -131,8 +131,11 @@ pub struct PlayerState {
     pub muted: bool,
     pub repeat: Repeat,
     pub shuffle: bool,
-    /// The queue, by id, in its order; `at` the one playing.
-    pub queue: Vec<TrackId>,
+    /// The queue's length, and `at` where the one playing is in it. The
+    /// queue itself (50,000 tracks played from a list) is asked for a window
+    /// at a time, when `queue_version` changes.
+    pub queue_length: usize,
+    pub queue_version: u64,
     pub at: Option<usize>,
     pub notice: Option<Notice>,
 }
@@ -147,6 +150,8 @@ pub struct Engine<O: Output, L: Library> {
     /// The track playing or paused, as shown.
     current: Option<Playable>,
     queue: Queue,
+    /// Moved on at each change of the queue (not of the track playing).
+    queue_version: u64,
     rng: Shuffler,
     playing: bool,
     volume: f32,
@@ -173,6 +178,7 @@ impl<O: Output, L: Library> Engine<O, L> {
             loaded: Vec::new(),
             current: None,
             queue: memory.queue.checked(),
+            queue_version: 0,
             rng: Shuffler::new(seed),
             playing: false,
             volume: memory.volume.clamp(0.0, 1.0),
@@ -198,10 +204,16 @@ impl<O: Output, L: Library> Engine<O, L> {
             muted: self.muted,
             repeat: self.repeat,
             shuffle: self.queue.shuffled(),
-            queue: self.queue.tracks().to_vec(),
+            queue_length: self.queue.tracks().len(),
+            queue_version: self.queue_version,
             at: self.queue.position(),
             notice: self.notice.clone(),
         }
+    }
+
+    /// The queue, by id, in its order.
+    pub fn queue(&self) -> &[TrackId] {
+        self.queue.tracks()
     }
 
     /// Where the current track is.
@@ -230,6 +242,7 @@ impl<O: Output, L: Library> Engine<O, L> {
     /// Plays `ids`, from the one at `start`, instead of the queue.
     pub fn play(&mut self, ids: Vec<TrackId>, start: usize) {
         self.queue.replace(ids, start, &mut self.rng);
+        self.queue_version += 1;
         self.failures = 0;
         self.start_current(Duration::ZERO);
     }
@@ -241,6 +254,7 @@ impl<O: Output, L: Library> Engine<O, L> {
         } else {
             self.queue.append(ids);
         }
+        self.queue_version += 1;
         self.follow_queue();
     }
 
@@ -309,6 +323,7 @@ impl<O: Output, L: Library> Engine<O, L> {
     }
 
     pub fn remove(&mut self, position: usize) {
+        self.queue_version += 1;
         if self.queue.remove(position) {
             let current = self.queue.current();
             if self.playing {
@@ -325,12 +340,14 @@ impl<O: Output, L: Library> Engine<O, L> {
 
     pub fn move_track(&mut self, from: usize, to: usize) {
         self.queue.move_track(from, to);
+        self.queue_version += 1;
         self.follow_queue();
     }
 
     /// Empties the queue and stops.
     pub fn clear(&mut self) {
         self.queue.clear();
+        self.queue_version += 1;
         self.unload();
         self.playing = false;
         self.current = None;
@@ -354,6 +371,7 @@ impl<O: Output, L: Library> Engine<O, L> {
 
     pub fn set_shuffle(&mut self, shuffle: bool) {
         self.queue.set_shuffle(shuffle, &mut self.rng);
+        self.queue_version += 1;
         self.follow_queue();
     }
 

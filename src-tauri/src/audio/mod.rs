@@ -225,6 +225,11 @@ impl<O: Output + 'static, L: Library + 'static> Playback<O, L> {
     pub fn state(&self) -> PlayerState {
         lock(&self.engine).state()
     }
+
+    /// Reads the engine, as it is.
+    pub fn read<T>(&self, read: impl FnOnce(&Engine<O, L>) -> T) -> T {
+        read(&lock(&self.engine))
+    }
 }
 
 impl<O: Output + 'static, L: Library + 'static> Drop for Playback<O, L> {

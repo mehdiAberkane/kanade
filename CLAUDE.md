@@ -237,6 +237,30 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
     identifiant. Le choix est gardé dans `settings` (`library/playback.rs`) ;
   - double clic : la ligne ; Entrée et le menu : la sélection. Des fichiers « en
     ligne uniquement » : l'interface demande avant (`allowOnline`).
+- Lecteur intégré (KAN-8, `src-tauri/src/audio/`, `src/lib/audio.ts`, `NowPlaying.tsx`) :
+  le choix par défaut de « Lire avec » (Réglages › Lecture, id `builtin`).
+  - Son décodé par Symphonia et joué par rodio (cpal, WASAPI), sur ses propres fils :
+    la lecture continue fenêtre réduite. Formats lus : MP3, FLAC, MP4 (AAC, ALAC), Ogg
+    Vorbis, WAV, AIFF (`audio::reads`). L'Opus, l'APE, le WavPack, le Musepack et le
+    WMA sont laissés de côté ; s'il n'y a qu'eux, le lecteur de Windows les lit.
+  - `queue.rs` : la file par identifiant, aléatoire sans répétition avant d'avoir fait
+    le tour, répéter (non, tout, un). `engine.rs` : la piste suivante est ajoutée à rodio
+    5 s avant la fin de la courante, d'où l'enchaînement sans blanc ; un morceau
+    introuvable, illisible ou d'un format non lu est passé, trois de suite arrêtent.
+  - `clear` et `try_seek` de rodio attendent la sortie : la file de rodio est jetée au
+    lieu d'être vidée, et une sortie perdue (rappel d'erreur de cpal) est rouverte.
+  - Sortie et bibliothèque derrière des traits (`Output`, `Library`) : faux dans les
+    tests, `Speakers::silent()` pour les commandes. Aucun test ne sort de son du PC.
+  - Commandes : `audio_add` (lire, ensuite, à la fin), `audio_control` (les boutons),
+    `audio_state`, `audio_queue` (une fenêtre de la file : 50 000 morceaux joués depuis
+    une liste). Évènements : `player-state`, et `player-position` quatre fois par
+    seconde, écouté par la seule barre de progression.
+  - Double clic : la liste depuis la ligne ; seule la piste de départ, si elle n'est que
+    sur OneDrive, fait poser la question. Un autre lecteur lancé met Kanade en pause.
+  - File, position, volume et répétition gardés dans `settings` (`player_memory`),
+    retrouvés en pause au lancement.
+  - Touches multimédia, pastille de Windows, boutons de la vignette, sortie changée :
+    KAN-55.
 - Statistiques (KAN-36, page « Statistiques », `src/lib/stats.ts`) :
   - calculées dans l'interface, comme la Santé, sur les lignes de la liste : mêmes
     albums et artistes que les onglets. Les fichiers introuvables ne sont pas comptés ;

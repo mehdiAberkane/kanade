@@ -3,7 +3,7 @@
 // picker that hands out MusicBee; plays that answer as the Rust side does.
 import type { InvokeArgs } from "@tauri-apps/api/core";
 import type { LibraryError } from "../lib/libraries";
-import type { Chosen, Outcome, Player, Players } from "../lib/player";
+import { BUILTIN, type Chosen, type Outcome, type Player, type Players } from "../lib/player";
 import type { TrackRow } from "../lib/tracks";
 
 const player = (name: string, path: string, enqueue = true): Player => ({
@@ -46,16 +46,19 @@ function iconOf(p: Player): Uint8Array<ArrayBuffer> {
  * of library 2 (OneDrive) are kept online only.
  */
 export function createMockPlayers(rowById: (id: unknown) => TrackRow | undefined) {
-  let chosen: Player | null = null;
+  /** Kanade's own player (KAN-8) until another is chosen. */
+  let chosen: Player | "default" | "builtin" = "builtin";
 
   function players(): Players {
-    const kind: Chosen = chosen
-      ? { kind: "program", player: chosen, available: true }
-      : { kind: "default", opensWith: VLC };
+    const kind: Chosen =
+      typeof chosen === "string"
+        ? { kind: chosen, opensWith: VLC }
+        : { kind: "program", player: chosen, available: true };
     return { chosen: kind, detected: DETECTED };
   }
 
-  const known = () => [...DETECTED, ...(chosen ? [chosen] : [])];
+  const program = () => (typeof chosen === "string" ? null : chosen);
+  const known = () => [...DETECTED, ...(typeof chosen === "string" ? [] : [chosen])];
 
   function play(args: { ids?: number[]; enqueue?: boolean; allowOnline?: boolean }): unknown {
     const rows = (args.ids ?? []).map((id) => rowById(id));
@@ -68,7 +71,7 @@ export function createMockPlayers(rowById: (id: unknown) => TrackRow | undefined
     const online = tracks.filter((row) => row[1] === 2).length;
     const outcome: Outcome = {
       launched: true,
-      player: (chosen ?? VLC).name,
+      player: (program() ?? VLC).name,
       online: 0,
       playlist: tracks.length > 500,
       onlyFirst: false,
@@ -87,7 +90,11 @@ export function createMockPlayers(rowById: (id: unknown) => TrackRow | undefined
         return players();
       case "player_set": {
         if (named.id === null || named.id === undefined) {
-          chosen = null;
+          chosen = "default";
+          return players();
+        }
+        if (named.id === BUILTIN) {
+          chosen = "builtin";
           return players();
         }
         const found = known().find((p) => p.id === named.id);
@@ -100,7 +107,7 @@ export function createMockPlayers(rowById: (id: unknown) => TrackRow | undefined
         chosen = MUSICBEE;
         return players();
       case "player_try":
-        return (chosen ?? VLC).name;
+        return (program() ?? VLC).name;
       case "player_icon": {
         const found = known().find((p) => p.id === named.id);
         return found ? iconOf(found) : refuse({ code: "player_not_found" });

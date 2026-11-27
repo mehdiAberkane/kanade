@@ -331,7 +331,14 @@ describe("the fake players", () => {
     setup();
     const list = await invoke<Players>("players_list");
     expect(list.detected.map((p) => p.name)).toEqual(["AIMP", "foobar2000", "VLC"]);
-    expect(list.chosen).toMatchObject({ kind: "default", opensWith: { name: "VLC" } });
+    // Kanade's own by default (KAN-8), Windows' own a choice.
+    expect(list.chosen).toMatchObject({ kind: "builtin", opensWith: { name: "VLC" } });
+    expect(await invoke<Players>("player_set", { id: null })).toMatchObject({
+      chosen: { kind: "default", opensWith: { name: "VLC" } },
+    });
+    expect(await invoke<Players>("player_set", { id: "builtin" })).toMatchObject({
+      chosen: { kind: "builtin" },
+    });
     expect(await invoke("player_try")).toBe("VLC");
     const aimp = list.detected[0].id;
     expect(await invoke<Players>("player_set", { id: aimp })).toMatchObject({
