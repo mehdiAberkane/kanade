@@ -88,6 +88,8 @@ function backend(
     scenario?: LibrariesScenario;
     tracks?: TrackRow[] | null;
     overrides?: Record<string, Override>;
+    /** Windows' own player chosen instead of Kanade's (KAN-45 before KAN-8). */
+    windowsPlayer?: boolean;
   } = {},
 ) {
   const calls: { cmd: string; args: InvokeArgs | undefined }[] = [];
@@ -97,6 +99,7 @@ function backend(
     trackScale: 0.002,
   });
   const mock = libraries;
+  if (options.windowsPlayer) mock.handle("player_set", { id: null });
   const tracks = options.tracks === undefined ? SAMPLE() : options.tracks;
   mockIPC(
     (cmd, args) => {
@@ -732,6 +735,7 @@ describe("Playing with a player (KAN-45)", () => {
 
   it("plays a row double-clicked, the selection with Enter, and from the menu", async () => {
     const { calls } = backend({
+      windowsPlayer: true,
       overrides: { tracks_play: () => played(), track_open_with: () => null },
     });
     const app = await renderApp();
@@ -776,6 +780,7 @@ describe("Playing with a player (KAN-45)", () => {
 
   it("asks before files only in the cloud, and says what a play did", async () => {
     const { calls } = backend({
+      windowsPlayer: true,
       overrides: {
         tracks_play: (args) =>
           (args as { allowOnline: boolean }).allowOnline
@@ -799,6 +804,7 @@ describe("Playing with a player (KAN-45)", () => {
 
   it("says why nothing played", async () => {
     backend({
+      windowsPlayer: true,
       overrides: {
         tracks_play: refuse({ code: "file_gone", name: "Andy.flac" }),
         track_open_with: refuse({ code: "launch_failed", message: "refusé" }),
@@ -816,7 +822,7 @@ describe("Playing with a player (KAN-45)", () => {
     expect(await app.screen.findByText("Le lecteur n'a pas démarré : refusé")).toBeTruthy();
   });
 
-  it("names Windows' own player when the players cannot be read", async () => {
+  it("uses Kanade's own player when the players cannot be read", async () => {
     backend({ overrides: { players_list: refuse({ code: "database", message: "fermée" }) } });
     const app = await renderApp();
     const table = await grid(app);
@@ -828,8 +834,8 @@ describe("Playing with a player (KAN-45)", () => {
       target: app.screen.getByRole("row", { name: /Andy/ }),
     });
     const menu = app.within(app.screen.getByRole("menu"));
+    expect(menu.getByRole("menuitem", { name: "Lire" })).toBeTruthy();
     expect(menu.getByRole("menuitem", { name: "Lire avec le lecteur de Windows" })).toBeTruthy();
-    expect(menu.queryByRole("menuitem", { name: /^Ajouter à la file/ })).toBeNull();
   });
 });
 
@@ -841,8 +847,8 @@ describe("Track menu", () => {
     const rowOf = (title: string) => app.screen.getByRole("row", { name: new RegExp(title) });
     await app.user.pointer({ keys: "[MouseRight]", target: rowOf("Andy") });
     const menu = app.within(app.screen.getByRole("menu"));
-    // First, the player of the fake backend (KAN-45).
-    expect(document.activeElement?.textContent).toBe("Lire avec VLC");
+    // First, Kanade's own player (KAN-8).
+    expect(document.activeElement?.textContent).toBe("Lire");
     await app.user.click(menu.getByRole("menuitem", { name: "Copier le chemin" }));
     expect(await navigator.clipboard.readText()).toBe("D:\\Musique\\Andy.flac");
     expect(app.screen.queryByRole("menu")).toBeNull();
@@ -874,9 +880,11 @@ describe("Track menu", () => {
     expect(document.activeElement?.textContent).toBe("Ouvrir avec…");
     await app.user.keyboard("{ArrowDown}");
     expect(document.activeElement?.textContent).toBe("Copier le chemin");
-    // Down from the first entry, then right, along the stars.
-    // Down past the player's two entries and the favourite, then right.
-    await app.user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowRight}");
+    // Down past the player's four entries and the favourite, then right,
+    // along the stars.
+    await app.user.keyboard(
+      "{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowRight}",
+    );
     expect(document.activeElement?.getAttribute("aria-label")).toBe("2 étoiles");
     await app.user.keyboard("{ArrowLeft}");
     expect(document.activeElement?.getAttribute("aria-label")).toBe("1 étoile");

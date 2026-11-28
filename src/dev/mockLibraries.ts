@@ -18,6 +18,7 @@ import type { AlbumView } from "../lib/albums";
 import { AUDIO_EXTENSIONS, folderUnder, leftOut, type Exclusions } from "../lib/exclusions";
 import type { Mark } from "../lib/marks";
 import type { TrackRow, TrackView } from "../lib/tracks";
+import { createMockAudio, NOT_MINE as NOT_AUDIO } from "./mockAudio";
 import { createMockPlayers, NOT_MINE as NOT_A_PLAYER } from "./mockPlayers";
 import { createMockTags, NOT_MINE as NOT_A_TAG } from "./mockTags";
 import { mockTracks } from "./mockTracks";
@@ -336,6 +337,7 @@ export function createMockLibraries({
     return changed;
   }
   const players = createMockPlayers(rowById);
+  const audio = createMockAudio(rowById, stepMs / 2);
   const tags = createMockTags(rowById, stepMs);
   const queue: Job[] = [];
   let running: Running | null = null;
@@ -468,6 +470,8 @@ export function createMockLibraries({
     };
     const played = players.handle(cmd, args);
     if (played !== NOT_A_PLAYER) return played;
+    const heard = audio.handle(cmd, args);
+    if (heard !== NOT_AUDIO) return heard;
     const tagged = tags.handle(cmd, args);
     if (tagged !== NOT_A_TAG) return tagged;
     switch (cmd) {
@@ -675,6 +679,7 @@ export function createMockLibraries({
 
   /** Stops the fake scans, so that none emits once a test is over. */
   function dispose() {
+    audio.dispose();
     queue.length = 0;
     if (running) clearInterval(running.timer);
     running = null;

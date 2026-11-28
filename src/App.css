@@ -2280,3 +2280,248 @@ fieldset.settings-section legend + * {
     transform: translateY(0.5rem);
   }
 }
+
+/* --- The built-in player's bar and its queue (KAN-8) -------------------- */
+
+.now-playing {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 0.25rem 1rem;
+  border-top: 1px solid var(--border);
+  padding: 0.4rem 1rem;
+  background: var(--panel);
+}
+
+.now-track {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.now-cover {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.now-cover-none {
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  color: var(--muted);
+}
+
+.now-titles {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.now-title,
+.now-artist {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.now-title {
+  font-weight: 600;
+}
+
+.now-artist {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.now-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+}
+
+.now-buttons,
+.now-side {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.now-side {
+  justify-content: flex-end;
+}
+
+.now-btn {
+  border: none;
+  border-radius: 6px;
+  padding: 0.15rem 0.45rem;
+  background: none;
+  font-size: 1rem;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.now-btn:hover:not(:disabled) {
+  background: var(--bg);
+}
+
+.now-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.now-btn:focus-visible,
+.queue-play:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.now-btn[aria-pressed="true"] {
+  background: var(--bg);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.now-play,
+.now-play:hover:not(:disabled) {
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.now-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.now-progress input {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+.now-time {
+  min-width: 3.2rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.now-volume {
+  width: 6rem;
+  accent-color: var(--accent);
+}
+
+.now-count {
+  margin-left: 0.25rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.now-notice {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.queue-panel {
+  position: absolute;
+  right: 1rem;
+  bottom: calc(100% + 0.5rem);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  width: min(26rem, calc(100vw - 2rem));
+  max-height: 60vh;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
+}
+
+.queue-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.queue-head h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 1rem;
+}
+
+.queue-list {
+  overflow-y: auto;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.queue-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  border-radius: 6px;
+}
+
+.queue-list li[aria-current="true"] {
+  background: var(--bg);
+  font-weight: 600;
+}
+
+.queue-list li.dim {
+  opacity: 0.55;
+}
+
+.queue-play {
+  display: grid;
+  flex: 1;
+  grid-template-areas:
+    "title time"
+    "artist time";
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  border: none;
+  padding: 0.3rem 0.4rem;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.queue-title,
+.queue-artist {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-title {
+  grid-area: title;
+}
+
+.queue-artist {
+  grid-area: artist;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: normal;
+}
+
+.queue-time {
+  grid-area: time;
+  padding-left: 0.5rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}

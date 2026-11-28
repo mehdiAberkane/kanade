@@ -112,6 +112,10 @@ impl Player {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Chosen {
+    /// Kanade's own player (KAN-8); `opensWith`, what Windows opens an MP3
+    /// with, for « Lire avec » of the menu.
+    #[serde(rename_all = "camelCase")]
+    Builtin { opens_with: Option<Player> },
     /// Windows' own; `opensWith`, what it opens an MP3 with, when it is a
     /// program (none for an app of the Store).
     #[serde(rename_all = "camelCase")]
@@ -205,9 +209,13 @@ impl<R: Registry, L: Launcher> Environment<'_, R, L> {
                 .cloned()
                 .unwrap_or_else(|| Player::of(path, None))
         };
+        let windows = || self.finder.default_program("mp3").map(|p| named(&p));
         let chosen = match choice {
+            PlayerChoice::Builtin => Chosen::Builtin {
+                opens_with: windows(),
+            },
             PlayerChoice::Default => Chosen::Default {
-                opens_with: self.finder.default_program("mp3").map(|p| named(&p)),
+                opens_with: windows(),
             },
             PlayerChoice::Program { path } => Chosen::Program {
                 player: named(Path::new(path)),
@@ -221,7 +229,7 @@ impl<R: Registry, L: Launcher> Environment<'_, R, L> {
     pub fn program_of(&self, choice: &PlayerChoice, id: &str) -> Option<PathBuf> {
         let players = self.players(choice);
         let chosen = match players.chosen {
-            Chosen::Default { opens_with } => opens_with,
+            Chosen::Builtin { opens_with } | Chosen::Default { opens_with } => opens_with,
             Chosen::Program { player, .. } => Some(player),
         };
         players
@@ -275,7 +283,9 @@ impl<R: Registry, L: Launcher> Environment<'_, R, L> {
                 outcome.fell_back = true;
                 None
             }
-            PlayerChoice::Default => None,
+            // Kanade's own plays from its own commands (audio/): here, as
+            // « Lire avec » what Windows opens the file with.
+            PlayerChoice::Builtin | PlayerChoice::Default => None,
         };
         let extension = Path::new(&first.path)
             .extension()
@@ -321,7 +331,7 @@ impl<R: Registry, L: Launcher> Environment<'_, R, L> {
     pub fn try_player(&self, choice: &PlayerChoice) -> Result<String, LibraryError> {
         let program = match choice {
             PlayerChoice::Program { path } => Some(PathBuf::from(path)),
-            PlayerChoice::Default => self.finder.default_program("mp3"),
+            PlayerChoice::Builtin | PlayerChoice::Default => self.finder.default_program("mp3"),
         }
         .filter(|p| (self.finder.exists)(p))
         .ok_or(LibraryError::PlayerNotFound)?;

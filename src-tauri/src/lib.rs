@@ -2,6 +2,7 @@
 // the memory-safety risks stay in the crates it depends on.
 #![forbid(unsafe_code)]
 
+mod audio;
 mod background;
 mod commands;
 #[cfg(feature = "e2e")]
@@ -12,6 +13,7 @@ pub mod store;
 mod summary;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use commands::{Background, Covers, Libraries, TauriEvents};
 use library::{LibraryService, ScanEvents, TooBroad};
@@ -51,7 +53,7 @@ fn open_database(
                 LibraryService::new(opened.index, scan_index, events, TooBroad::from_env());
             // Settings that cannot be read: no scan at launch, the rest works.
             let _ = service.scan_on_startup();
-            (opened.status, Libraries(Some(service)))
+            (opened.status, Libraries(Some(Arc::new(service))))
         }
         Err(error) => (DatabaseStatus::Failed { error }, Libraries(None)),
     }
@@ -106,6 +108,13 @@ pub fn run() {
                 data.as_ref().ok().map(|data| data.join("background.jpg")),
             ));
             app.manage(status);
+            // The built-in player, as it was left (KAN-8).
+            app.manage(commands::Audio(libraries.0.as_ref().map(|service| {
+                let seed = u64::try_from(store::now_ms()).unwrap_or(1);
+                let engine =
+                    audio::Engine::new(audio::Speakers::default(), Arc::clone(service), seed);
+                audio::Playback::start(engine, TauriEvents(app.handle().clone()), audio::TICK)
+            })));
             app.manage(libraries);
             let covers = cache.join("cache").join("covers");
             app.manage(Covers(covers.clone()));
@@ -137,6 +146,10 @@ pub fn run() {
             commands::player_try,
             commands::player_icon,
             commands::tracks_play,
+            commands::audio_add,
+            commands::audio_control,
+            commands::audio_state,
+            commands::audio_queue,
             commands::track_open_with,
             commands::stats_save_text,
             commands::stats_save_image,

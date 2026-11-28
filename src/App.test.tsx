@@ -341,8 +341,9 @@ describe("Lecture", () => {
     const { screen, user, waitFor, within } = await openSettings();
     const group = await screen.findByRole("radiogroup", { name: "Lire avec" });
     const choice = (name: RegExp) => within(group).getByRole<HTMLInputElement>("radio", { name });
+    // Kanade's own by default (KAN-8).
     await waitFor(() => {
-      expect(choice(/^Lecteur par défaut de Windows/).checked).toBe(true);
+      expect(choice(/^Lecteur intégré de Kanade/).checked).toBe(true);
     });
     expect(group.textContent).toContain(
       "Aujourd'hui VLC : C:\\Program Files\\VideoLAN\\VLC\\vlc.exe",
@@ -361,7 +362,11 @@ describe("Lecture", () => {
     await waitFor(() => {
       expect(choice(/^Lecteur par défaut de Windows/).checked).toBe(true);
     });
-    expect(calls.filter((c) => c === "player_set")).toHaveLength(2);
+    await user.click(choice(/^Lecteur intégré de Kanade/));
+    await waitFor(() => {
+      expect(choice(/^Lecteur intégré de Kanade/).checked).toBe(true);
+    });
+    expect(calls.filter((c) => c === "player_set")).toHaveLength(3);
   });
 
   it("says when the player chosen is gone, and why a choice was refused", async () => {

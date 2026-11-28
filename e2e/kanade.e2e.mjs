@@ -319,3 +319,52 @@ it("writes a title into the file from the tag editor, and undoes it", async () =
   await editorTitle("Modification annulée");
   expect(holds(path, title)).toBe(false);
 });
+
+/** The title in the built-in player's bar, and whether it plays. */
+function nowPlaying() {
+  return kanade.run(`
+    const bar = document.querySelector('section[aria-label="Lecteur"]');
+    return bar && {
+      title: bar.querySelector(".now-title").textContent,
+      playing: bar.querySelector('[aria-label="Pause"]') !== null,
+    };
+  `);
+}
+
+// KAN-8: a track double-clicked goes to the built-in player, whose bar shows
+// it; its queue is found again, paused, after a restart. A runner of the CI
+// has no sound card: the player says so, and keeps its queue all the same.
+it("plays a track from the list, and finds it again paused after a restart", async () => {
+  await launch();
+  let seen = [];
+  await waitFor(
+    async () => {
+      seen = await rows();
+      return seen.length >= files.length;
+    },
+    () => `the tracks in the list, ${seen.length} shown`,
+  );
+  const title = await kanade.run(`
+    const row = document.querySelector('[role="row"][aria-rowindex="2"]');
+    row.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+    return row.querySelector('[role="gridcell"]').firstChild.textContent;
+  `);
+  let now = null;
+  await waitFor(
+    async () => {
+      now = await nowPlaying();
+      return now?.title === title;
+    },
+    () => `« ${title} » in the player's bar, got ${JSON.stringify(now)}`,
+  );
+
+  await kanade.quit();
+  await launch();
+  await waitFor(
+    async () => {
+      now = await nowPlaying();
+      return now?.title === title && !now.playing;
+    },
+    () => `« ${title} » paused after the restart, got ${JSON.stringify(now)}`,
+  );
+});

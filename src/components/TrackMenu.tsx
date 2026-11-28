@@ -123,7 +123,53 @@ export function TrackMenu({ x, y, tracks, focus, root, onClose }: Props) {
         </div>
       ) : (
         <>
-          {playback && (
+          {playback?.builtin && (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  playback.play(ids, false);
+                  onClose();
+                }}
+              >
+                Lire
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  playback.playNext(ids);
+                  onClose();
+                }}
+              >
+                Lire ensuite
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  playback.play(ids, true);
+                  onClose();
+                }}
+              >
+                Ajouter à la file d'attente
+              </button>
+              {playback.other && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    playback.playWith(ids);
+                    onClose();
+                  }}
+                >
+                  Lire avec {playback.other}
+                </button>
+              )}
+            </>
+          )}
+          {playback && !playback.builtin && (
             <>
               <button
                 type="button"

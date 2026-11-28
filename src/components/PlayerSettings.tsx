@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { errorText } from "../lib/libraries";
-import { playerIcon, type Player, type Players } from "../lib/player";
+import { BUILTIN, playerIcon, type Player, type Players } from "../lib/player";
 
 /** The icon Windows shows for a player, once it came; nothing otherwise. */
 function PlayerIcon({ id }: { id: string }) {
@@ -19,9 +19,10 @@ function PlayerIcon({ id }: { id: string }) {
 }
 
 /**
- * Settings › Lecture (KAN-45): which player plays the tracks. Windows' own
- * by default; a player found in the registry; or a program picked in
- * Windows' picker, opened on the Rust side. « Essayer » starts it.
+ * Settings › Lecture (KAN-45, KAN-8): which player plays the tracks.
+ * Kanade's own by default; Windows' own; a player found in the registry; or
+ * a program picked in Windows' picker, opened on the Rust side. « Essayer »
+ * starts a player of Windows.
  */
 export function PlayerSettings() {
   const [players, setPlayers] = useState<Players | null>(null);
@@ -60,16 +61,32 @@ export function PlayerSettings() {
           : []),
       ]
     : [];
-  const opensWith = chosen?.kind === "default" ? chosen.opensWith : null;
+  const opensWith = chosen && chosen.kind !== "program" ? chosen.opensWith : null;
 
   return (
     <div className="settings-section">
       <h2>Lecture</h2>
       <p className="hint">
-        Les morceaux se lisent avec un lecteur installé sur Windows : double clic ou Entrée dans la
-        liste, ou « Lire avec » dans le menu du morceau.
+        Ce que font le double clic et Entrée dans la liste, et « Lire » dans le menu du morceau.
       </p>
       <div className="player-choices" role="radiogroup" aria-label="Lire avec">
+        <label className="player-choice">
+          <input
+            type="radio"
+            name="player"
+            checked={chosen?.kind === "builtin"}
+            disabled={!players}
+            onChange={() => {
+              choose(BUILTIN);
+            }}
+          />
+          <span className="player-icon" />
+          <span className="player-name">Lecteur intégré de Kanade</span>
+          <span className="hint player-path">
+            MP3, FLAC, M4A, Ogg Vorbis, WAV, AIFF ; les autres formats partent vers le lecteur de
+            Windows
+          </span>
+        </label>
         <label className="player-choice">
           <input
             type="radio"
