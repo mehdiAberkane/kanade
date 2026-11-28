@@ -14,7 +14,7 @@ use rusqlite::Connection;
 use super::{StoreError, user_version};
 
 /// The version the steps below lead to.
-pub const LATEST_VERSION: i32 = 9;
+pub const LATEST_VERSION: i32 = 10;
 
 struct Migration {
     version: i32,
@@ -163,6 +163,16 @@ CREATE TABLE tag_edits (
     PRIMARY KEY (change_id, track_id)
 );
 CREATE INDEX tag_edits_track ON tag_edits (track_id);",
+    },
+    // KAN-41: the print of each track's sound (library/fingerprint.rs), to
+    // find a file moved and retagged: none yet for every track (NULL, made
+    // in the background), 0 for a file without one. The index serves the
+    // search of a gone track by format and duration: only printed ones.
+    Migration {
+        version: 10,
+        sql: "
+ALTER TABLE tracks ADD COLUMN print INTEGER;
+CREATE INDEX tracks_sound ON tracks (format, duration_ms) WHERE print IS NOT NULL AND print != 0;",
     },
 ];
 
@@ -398,6 +408,22 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM tag_edits", [], |r| r.get(0))
             .unwrap();
         assert_eq!(edits, 0, "the track's journal goes with it");
+    }
+
+    #[test]
+    fn step_10_leaves_every_track_to_print() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate_to(&mut conn, 9).unwrap();
+        conn.execute_batch(
+            "INSERT INTO tracks (path, size, modified_ms, format, has_cover)
+             VALUES ('D:\\Musique\\a.flac', 1, 1, 'FLAC', 0);",
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let print: Option<i64> = conn
+            .query_row("SELECT print FROM tracks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(print, None);
     }
 
     #[test]

@@ -5,6 +5,7 @@
 pub mod appearance;
 pub mod covers;
 pub mod exclusions;
+pub mod fingerprint;
 pub mod health;
 pub mod index;
 pub mod libraries;

@@ -342,11 +342,14 @@ fn a_database_whose_pages_are_damaged_is_restored_too() {
             })
             .unwrap();
     }
-    // Garbage over a page in the middle of the file, header left intact.
+    // Garbage over pages through the file, header left intact: one of them
+    // is a page of the tracks, whatever the schema's layout.
     let path = dir.path().join(DB_FILE);
     let mut bytes = fs::read(&path).unwrap();
-    let middle = bytes.len() / 2;
-    bytes[middle..middle + 2048].fill(0xA5);
+    let len = bytes.len();
+    for at in [len / 4, len / 2, len * 3 / 4] {
+        bytes[at..at + 2048].fill(0xA5);
+    }
     fs::write(&path, bytes).unwrap();
 
     let Opened { status, .. } = open(dir.path(), NOW + HOUR).unwrap();

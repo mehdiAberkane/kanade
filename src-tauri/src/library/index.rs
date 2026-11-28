@@ -339,7 +339,7 @@ pub(super) fn update_tracks(
          artist = ?6, album_artist = ?7, album = ?8, track_number = ?9, disc_number = ?10, \
          year = ?11, genre = ?12, duration_ms = ?13, bitrate_kbps = ?14, has_cover = ?15, \
          status = 'present', status_since_ms = NULL, status_reason = NULL, status_kind = NULL, \
-         excluded_ms = NULL WHERE id = ?16",
+         excluded_ms = NULL, print = NULL WHERE id = ?16",
     )?;
     for (id, t) in updates {
         let mut values = file_values(t);
@@ -377,7 +377,7 @@ fn size_column(value: u64) -> i64 {
 }
 
 /// The columns `status`, `status_since_ms`, `status_reason`, `status_kind`.
-fn status_columns(
+pub(super) fn status_columns(
     status: &TrackStatus,
 ) -> (
     &'static str,
@@ -411,7 +411,7 @@ fn kind_name(kind: ReadErrorKind) -> &'static str {
 
 /// The status stored in columns `first` (name), `first + 1` (since),
 /// `first + 2` (reason) and `first + 3` (kind).
-fn status_from_row(r: &Row<'_>, first: usize) -> rusqlite::Result<TrackStatus> {
+pub(super) fn status_from_row(r: &Row<'_>, first: usize) -> rusqlite::Result<TrackStatus> {
     let name: String = r.get(first)?;
     let since: Option<i64> = r.get(first + 1)?;
     Ok(match name.as_str() {
