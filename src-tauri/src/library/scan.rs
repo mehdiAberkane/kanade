@@ -14,6 +14,7 @@ use walkdir::WalkDir;
 use super::exclusions::Excluded;
 use super::index::{Candidate, Changes, Index, Known, TrackId, TrackStatus};
 use super::paths;
+use super::tag_write::TagField;
 use super::track::{FileStamp, ReadError, ReadErrorKind, Track, is_audio_file, read_track};
 use crate::store::{self, StoreError};
 
@@ -178,6 +179,15 @@ pub enum LibraryError {
     NotInLibrary {
         name: String,
     },
+    /// A value of the tag editor is not one a tag can hold (KAN-7): a
+    /// track number that is not a number, a year of three digits.
+    InvalidTag {
+        field: TagField,
+    },
+    /// Tags are already being written: one change at a time.
+    TagsBusy,
+    /// No change of tags is left to undo.
+    NothingToUndo,
     /// A file could not be written (the export of the errors).
     Io {
         message: String,
@@ -212,6 +222,9 @@ impl fmt::Display for LibraryError {
             Self::NotInLibrary { name } => {
                 write!(f, "this folder is not inside the library {name}")
             }
+            Self::InvalidTag { field } => write!(f, "invalid value for the tag {field:?}"),
+            Self::TagsBusy => f.write_str("tags are already being written"),
+            Self::NothingToUndo => f.write_str("no change of tags to undo"),
             Self::Io { message } => write!(f, "file error: {message}"),
             Self::Database { message } => write!(f, "library database error: {message}"),
         }

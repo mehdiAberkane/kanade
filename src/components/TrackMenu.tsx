@@ -6,6 +6,7 @@ import { errorText } from "../lib/libraries";
 import { MAX_RATING, ratingText, useMarks } from "../lib/marks";
 import { usePlayback } from "../lib/player";
 import type { Track } from "../lib/tracks";
+import { useTagEditing } from "../lib/useTagEditor";
 
 interface Props {
   x: number;
@@ -23,8 +24,8 @@ const ITEMS = "[role=menuitem], [role=menuitemradio]";
 const STEPS: Record<string, number> = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 };
 
 /**
- * The right-click menu of the list. Only what works today: playing (KAN-8),
- * editing tags (KAN-7) and playlists will add their entries.
+ * The right-click menu of the list. Only what works today: playlists will
+ * add their entries.
  */
 export function TrackMenu({ x, y, tracks, focus, root, onClose }: Props) {
   const menu = useRef<HTMLDivElement>(null);
@@ -33,6 +34,7 @@ export function TrackMenu({ x, y, tracks, focus, root, onClose }: Props) {
   const [excluding, setExcluding] = useState(false);
   const mark = useMarks();
   const playback = usePlayback();
+  const tagging = useTagEditing();
   const ids = tracks.map((t) => t.id);
   const allFavorite = tracks.every((t) => t.favorite);
   const several = tracks.length > 1 ? `les ${tracks.length} morceaux ` : "";
@@ -225,6 +227,32 @@ export function TrackMenu({ x, y, tracks, focus, root, onClose }: Props) {
               </button>
             ))}
           </div>
+          {tagging && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                tagging.edit(tracks);
+                onClose();
+              }}
+            >
+              {tracks.length > 1
+                ? `Modifier les tags des ${tracks.length} morceaux…`
+                : "Modifier les tags…"}
+            </button>
+          )}
+          {tagging?.last && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                tagging.undo();
+                onClose();
+              }}
+            >
+              Annuler la dernière modification des tags
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"

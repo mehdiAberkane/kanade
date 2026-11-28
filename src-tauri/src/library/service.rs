@@ -25,6 +25,7 @@ use super::paths;
 use super::playback::PlayerChoice;
 use super::scan::{LibraryError, ScanError};
 use super::scanner::{ScanEvents, ScanState, Scanner};
+use super::tag_changes::TagJob;
 use super::watcher::{Timing, WatchState, Watcher};
 use crate::audio::{self, Memory, Playable, Skip};
 use crate::store;
@@ -81,6 +82,8 @@ impl DropReport {
 
 pub struct LibraryService {
     index: Mutex<Index>,
+    /// The change of tags running, if one does (KAN-7).
+    tags: TagJob,
     /// Before the scanner: stopped first, it asks no more scans.
     watcher: Watcher,
     scanner: Scanner,
@@ -110,6 +113,7 @@ impl LibraryService {
         let scanner = Scanner::start(scan_index, events);
         let service = Self {
             index: Mutex::new(index),
+            tags: TagJob::default(),
             watcher: Watcher::start(scanner.queue(), timing),
             scanner,
             too_broad,
@@ -128,8 +132,12 @@ impl LibraryService {
 
     /// The commands' connection. A command that panicked while holding it
     /// left no transaction open (rusqlite rolls back on drop).
-    fn index(&self) -> MutexGuard<'_, Index> {
+    pub(super) fn index(&self) -> MutexGuard<'_, Index> {
         self.index.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    pub(super) fn tags(&self) -> &TagJob {
+        &self.tags
     }
 
     /// At launch: every library scanned, if the settings say so.

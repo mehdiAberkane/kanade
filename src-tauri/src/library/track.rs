@@ -5,12 +5,12 @@
 //! lofty is caught, each tag item is capped in memory, and an error says
 //! whether trying again later may help (`ReadErrorKind`).
 
+use std::cell::Cell;
 use std::fmt;
 use std::fs;
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
-use std::sync::Once;
 use std::time::UNIX_EPOCH;
 
 use lofty::config::{GlobalOptions, ParseOptions, ParsingMode, apply_global_options};
@@ -178,11 +178,16 @@ pub fn is_audio_file(path: &Path) -> bool {
     extension(path).is_some_and(|e| AUDIO_EXTENSIONS.contains(&e.as_str()))
 }
 
-/// lofty's limits, set once for the whole process.
-fn configure_lofty() {
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| {
-        apply_global_options(GlobalOptions::new().allocation_limit(ALLOCATION_LIMIT));
+/// lofty's limits, set once on each thread that reads files: lofty keeps
+/// its options per thread.
+pub(super) fn configure_lofty() {
+    thread_local! {
+        static DONE: Cell<bool> = const { Cell::new(false) };
+    }
+    DONE.with(|done| {
+        if !done.replace(true) {
+            apply_global_options(GlobalOptions::new().allocation_limit(ALLOCATION_LIMIT));
+        }
     });
 }
 
@@ -244,10 +249,10 @@ pub fn read_cover(path: &Path) -> Option<Vec<u8>> {
         .map(|p| p.data().to_vec())
 }
 
-struct ParseFailure {
-    error: ReadError,
+pub(super) struct ParseFailure {
+    pub(super) error: ReadError,
     /// lofty refused an item bigger than ALLOCATION_LIMIT.
-    allocation: bool,
+    pub(super) allocation: bool,
 }
 
 /// One lofty read, with its panics caught.
@@ -294,7 +299,7 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 
 /// Reads lofty's error chain: damaged content, unless the disk or the
 /// network failed while reading (a share that dropped, a drive unplugged).
-fn classify(error: &dyn std::error::Error) -> ParseFailure {
+pub(super) fn classify(error: &dyn std::error::Error) -> ParseFailure {
     use io::ErrorKind as Io;
     let mut kind = ReadErrorKind::Content;
     let mut allocation = false;
@@ -326,7 +331,7 @@ fn classify(error: &dyn std::error::Error) -> ParseFailure {
     }
 }
 
-fn fill_from_tag(track: &mut Track, tag: &Tag) {
+pub(super) fn fill_from_tag(track: &mut Track, tag: &Tag) {
     track.title = clean(tag.title().as_deref());
     track.artist = clean(tag.artist().as_deref());
     track.album = clean(tag.album().as_deref());

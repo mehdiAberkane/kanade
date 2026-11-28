@@ -11,6 +11,7 @@
 // Tauri hands a command its arguments by value, State and window included.
 #![allow(clippy::needless_pass_by_value)]
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -21,6 +22,9 @@ use crate::audio::{Engine, Playable, Playback, PlayerEvents, PlayerState, Repeat
 use crate::background;
 use crate::library::marks;
 use crate::library::playback::PlayerChoice;
+use crate::library::tag_changes::TagReport;
+use crate::library::tag_journal::TagChange;
+use crate::library::tag_write::{TagEdit, TagField};
 use crate::library::{
     AlbumView, Appearance, CoverSize, DropReport, Library, LibraryError, LibraryId, LibraryService,
     LibraryView, Mark, RevealTarget, ScanErrors, ScanEvents, ScanProgress, Settings, TrackId,
@@ -59,6 +63,8 @@ const SCAN_PROGRESS: &str = "library-scan-progress";
 const LIBRARY_DROPPED: &str = "library-dropped";
 /// What a watch update changed in a library (KAN-27).
 const LIBRARY_UPDATED: &str = "library-updated";
+/// Where a change of tags stands (KAN-7), a few times a second.
+const TAGS_PROGRESS: &str = "tags-progress";
 /// The built-in player's track, queue or settings changed (KAN-8).
 const PLAYER_STATE: &str = "player-state";
 /// Where its track is, a few times a second while it plays.
@@ -1039,6 +1045,48 @@ pub fn track_cover(
     Ok(tauri::ipc::Response::new(jpeg))
 }
 
+/// Writes the tag editor's fields into the files of `ids` (KAN-7), an
+/// empty value removing its field; the report once every file is done.
+/// Its progress comes as `tags-progress`.
+#[tauri::command(async)]
+pub fn tags_write<R: Runtime>(
+    ids: Vec<TrackId>,
+    fields: BTreeMap<TagField, String>,
+    app: AppHandle<R>,
+    libraries: State<'_, Libraries>,
+) -> Result<TagReport, LibraryError> {
+    let edit = TagEdit::from_input(fields)?;
+    libraries.get()?.write_tags(&ids, &edit, |progress| {
+        let _ = app.emit(TAGS_PROGRESS, progress);
+    })
+}
+
+/// « Annuler la dernière modification »: the last change of tags undone.
+#[tauri::command(async)]
+pub fn tags_undo<R: Runtime>(
+    app: AppHandle<R>,
+    libraries: State<'_, Libraries>,
+) -> Result<TagReport, LibraryError> {
+    libraries.get()?.undo_tags(|progress| {
+        let _ = app.emit(TAGS_PROGRESS, progress);
+    })
+}
+
+/// Stops the change of tags running after the file it is writing.
+#[tauri::command(async)]
+pub fn tags_cancel(libraries: State<'_, Libraries>) -> Result<(), LibraryError> {
+    libraries.get()?.cancel_tags();
+    Ok(())
+}
+
+/// The change the next undo would undo, if any.
+#[tauri::command(async)]
+pub fn tags_last_change(
+    libraries: State<'_, Libraries>,
+) -> Result<Option<TagChange>, LibraryError> {
+    libraries.get()?.last_tag_change()
+}
+
 /// Every track of every library, for the list.
 #[tauri::command(async)]
 pub fn tracks_list(libraries: State<'_, Libraries>) -> Result<Vec<TrackRow>, LibraryError> {
@@ -1903,6 +1951,104 @@ mod tests {
             .unwrap();
         assert_eq!(entries[0].title, "");
         assert_eq!(entries[0].skip, Some(Skip::Gone));
+    }
+
+    /// KAN-7: the tags written through Tauri, their progress heard, the
+    /// change undone; a value no tag can hold refused before any file.
+    #[test]
+    fn the_tags_are_written_and_undone_through_tauri() {
+        use crate::library::track::tests::{FIXTURES, tagged_copy};
+        use std::sync::{Arc, Mutex};
+        use tauri::Listener;
+
+        let dir = tempfile::tempdir().unwrap();
+        let music = dir.path().join("Musique");
+        fs::create_dir(&music).unwrap();
+        for (file, _) in FIXTURES {
+            tagged_copy(file, &music.join(file), "So What");
+        }
+        let app = tauri::test::mock_builder()
+            .invoke_handler(tauri::generate_handler![
+                tags_write,
+                tags_undo,
+                tags_cancel,
+                tags_last_change,
+                tracks_list,
+            ])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let told = Arc::clone(&heard);
+        app.listen_any(TAGS_PROGRESS, move |event| {
+            told.lock().unwrap().push(event.payload().to_owned());
+        });
+        let data = dir.path().join("data");
+        let opened = store::open(&data, store::now_ms()).unwrap();
+        let service = LibraryService::new(
+            opened.index,
+            store::open_writer(&data).unwrap(),
+            Recorder::default(),
+            TooBroad::default(),
+        );
+        service.add(&music).unwrap();
+        service.wait_idle();
+        app.manage(Libraries(Some(Arc::new(service))));
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let rows = invoke(&webview, "tracks_list", serde_json::json!({})).unwrap();
+        let ids: Vec<i64> = rows
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row[0].as_i64().unwrap())
+            .collect();
+        assert_eq!(ids.len(), FIXTURES.len());
+
+        assert_eq!(
+            invoke(
+                &webview,
+                "tags_write",
+                serde_json::json!({ "ids": ids, "fields": { "year": "59" } })
+            )
+            .unwrap_err(),
+            serde_json::json!({ "code": "invalid_tag", "field": "year" })
+        );
+        assert_eq!(
+            invoke(&webview, "tags_last_change", serde_json::json!({})).unwrap(),
+            serde_json::Value::Null
+        );
+        let report = invoke(
+            &webview,
+            "tags_write",
+            serde_json::json!({
+                "ids": ids,
+                "fields": { "title": "Blue in Green", "albumArtist": "" }
+            }),
+        )
+        .unwrap();
+        assert_eq!(report["written"], FIXTURES.len());
+        assert_eq!(report["refused"], serde_json::json!([]));
+        assert_eq!(report["cancelled"], false);
+        let last = heard.lock().unwrap().last().cloned().unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&last).unwrap(),
+            serde_json::json!({ "done": FIXTURES.len(), "total": FIXTURES.len() })
+        );
+        let change = invoke(&webview, "tags_last_change", serde_json::json!({})).unwrap();
+        assert_eq!(change["files"], FIXTURES.len());
+        assert!(change["doneMs"].as_i64().unwrap() > 0);
+
+        assert_eq!(
+            invoke(&webview, "tags_cancel", serde_json::json!({})).unwrap(),
+            serde_json::Value::Null
+        );
+        let undone = invoke(&webview, "tags_undo", serde_json::json!({})).unwrap();
+        assert_eq!(undone["written"], FIXTURES.len());
+        assert_eq!(
+            invoke(&webview, "tags_undo", serde_json::json!({})).unwrap_err(),
+            serde_json::json!({ "code": "nothing_to_undo" })
+        );
     }
 
     /// Runs a command as the interface does, through Tauri's IPC.
