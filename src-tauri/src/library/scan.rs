@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use walkdir::WalkDir;
 
 use super::exclusions::Excluded;
+use super::fingerprint::{self, Print};
 use super::index::{Candidate, Changes, Index, Known, TrackId, TrackStatus};
 use super::paths;
 use super::tag_write::TagField;
@@ -303,6 +304,7 @@ pub fn scan_folder_with(
         seen: HashSet::new(),
         unreadable_dirs: Vec::new(),
         maybe_moved: Vec::new(),
+        maybe_retagged: Vec::new(),
         progress: ScanProgress::default(),
     };
 
@@ -373,6 +375,10 @@ struct Scan {
     /// New files with the same content as an indexed track: moves, or
     /// copies. Settled once the whole folder has been walked.
     maybe_moved: Vec<Track>,
+    /// New files like no indexed track by their tags, but of the format and
+    /// about the duration of a printed one: moved, then retagged (KAN-41)?
+    /// Settled by their sound once the folder has been walked.
+    maybe_retagged: Vec<Track>,
     progress: ScanProgress,
 }
 
@@ -437,11 +443,13 @@ impl Scan {
                 self.report.updated += 1;
             }
             (Ok(track), None) => {
-                if index.same_content(&track)?.is_empty() {
+                if !index.same_content(&track)?.is_empty() {
+                    self.maybe_moved.push(track);
+                } else if !index.sounding_like(&track)?.is_empty() {
+                    self.maybe_retagged.push(track);
+                } else {
                     self.changes.insert.push(track);
                     self.report.added += 1;
-                } else {
-                    self.maybe_moved.push(track);
                 }
             }
             (Err(error), Some(known)) => {
@@ -460,6 +468,38 @@ impl Scan {
                 self.report.unreadable += 1;
                 self.report.error(path, error.message);
             }
+        }
+        Ok(())
+    }
+
+    /// A new file not found by its tags: the gone track with the same sound,
+    /// when there is exactly one (moved, then retagged); else a new track.
+    /// Its print is made only when a gone track could be it.
+    fn by_sound(
+        &mut self,
+        index: &Index,
+        track: Track,
+        (root, gone): (&Path, &HashMap<String, Known>),
+        claimed: &mut HashSet<TrackId>,
+    ) -> Result<(), LibraryError> {
+        let candidates: Vec<(Candidate, Print)> = index
+            .sounding_like(&track)?
+            .into_iter()
+            .filter(|(c, _)| !claimed.contains(&c.id) && is_gone(c, root, gone))
+            .collect();
+        let print = if candidates.is_empty() {
+            None
+        } else {
+            fingerprint::print(Path::new(&track.path))
+        };
+        let mut same = candidates.iter().filter(|(_, p)| Some(*p) == print);
+        if let (Some((candidate, _)), None) = (same.next(), same.next()) {
+            claimed.insert(candidate.id);
+            self.changes.update.push((candidate.id, track));
+            self.report.moved += 1;
+        } else {
+            self.changes.insert.push(track);
+            self.report.added += 1;
         }
         Ok(())
     }
@@ -550,15 +590,17 @@ impl Scan {
                 .filter(|c| !claimed.contains(&c.id) && is_gone(c, root, &gone))
                 .collect();
             // Two gone tracks match: the move is not certain, so it is not
-            // guessed; the file becomes a new track.
+            // guessed; their sound may tell, or the file becomes a new track.
             if let [candidate] = candidates.as_slice() {
                 claimed.insert(candidate.id);
                 self.changes.update.push((candidate.id, track));
                 self.report.moved += 1;
             } else {
-                self.changes.insert.push(track);
-                self.report.added += 1;
+                self.by_sound(index, track, (root, &gone), &mut claimed)?;
             }
+        }
+        for track in std::mem::take(&mut self.maybe_retagged) {
+            self.by_sound(index, track, (root, &gone), &mut claimed)?;
         }
 
         for known in gone.values().filter(|k| !claimed.contains(&k.id)) {
@@ -609,6 +651,7 @@ fn is_gone(candidate: &Candidate, root: &Path, gone_under_root: &HashMap<String,
 mod tests {
     use super::*;
     use crate::library::track::tests::{FIXTURES, fixture, tagged_copy};
+    use lofty::prelude::*;
 
     /// Some time in 2027, as "now" for the scans.
     const NOW: i64 = 1_800_000_000_000;
@@ -817,6 +860,128 @@ mod tests {
         assert_eq!(
             track.track.title.as_deref(),
             Some("A much longer title than the first one")
+        );
+    }
+
+    /// Every track of the index printed, as the scan thread does it in the
+    /// background (scanner.rs).
+    fn print_all(index: &mut Index) {
+        for item in index.to_print(TrackId(0), usize::MAX).unwrap() {
+            let print = fingerprint::print(Path::new(&item.path));
+            index.set_print(item.id, item.stamp, print).unwrap();
+        }
+    }
+
+    /// Another program's new tags, longer: the size and the tags change.
+    fn retag(path: &Path, title: &str) {
+        use lofty::config::WriteOptions;
+        let mut file = lofty::read_from_path(path).unwrap();
+        let tag = file.primary_tag_mut().unwrap();
+        tag.set_title(title.to_owned());
+        tag.insert_text(ItemKey::Comment, "Retagged by another program".to_owned());
+        file.save_to_path(path, WriteOptions::default()).unwrap();
+    }
+
+    /// KAN-41: a file moved, then retagged elsewhere, is found again by its
+    /// sound: the same track, its id kept.
+    #[test]
+    fn a_file_moved_and_retagged_keeps_its_id() {
+        let dir = library();
+        let mut index = Index::open_in_memory().unwrap();
+        scan(&mut index, dir.path());
+        print_all(&mut index);
+        let elsewhere = tempfile::tempdir().unwrap();
+        let mut ids = Vec::new();
+        for (name, format) in FIXTURES {
+            let id = id_of(&index, &dir.path().join(name));
+            let out = elsewhere.path().join(name);
+            fs::rename(dir.path().join(name), &out).unwrap();
+            retag(&out, &format!("Retagged {name}"));
+            ids.push((id, *format, name));
+        }
+        let sub = dir.path().join("Rangé");
+        fs::create_dir(&sub).unwrap();
+        for (name, _) in FIXTURES {
+            fs::rename(elsewhere.path().join(name), sub.join(name)).unwrap();
+        }
+
+        let report = scan(&mut index, dir.path());
+        // The Opus has no print: a new track, the old one missing.
+        assert_eq!((report.moved, report.added, report.missing), (5, 1, 1));
+        for (id, format, name) in ids {
+            let moved = sub.join(name);
+            if format == "Opus" {
+                assert_ne!(id_of(&index, &moved), id, "{name}");
+            } else {
+                assert_eq!(id_of(&index, &moved), id, "{name}");
+                let track = index.track(id).unwrap().unwrap();
+                assert_eq!(
+                    track.track.title.as_deref(),
+                    Some(format!("Retagged {name}").as_str())
+                );
+                assert_eq!(track.status, TrackStatus::Present);
+            }
+        }
+    }
+
+    /// A retagged copy of a track still there is a new track; two gone tracks
+    /// with the same sound are not guessed between.
+    #[test]
+    fn a_sound_is_followed_only_when_it_is_certain() {
+        let dir = tempfile::tempdir().unwrap();
+        tagged_copy("tone.flac", &dir.path().join("a.flac"), "A");
+        let mut index = Index::open_in_memory().unwrap();
+        scan(&mut index, dir.path());
+        print_all(&mut index);
+        let a = id_of(&index, &dir.path().join("a.flac"));
+
+        // A copy, retagged: the original is there, the copy is new.
+        let copy = dir.path().join("copy.flac");
+        fs::copy(dir.path().join("a.flac"), &copy).unwrap();
+        retag(&copy, "Copy");
+        let report = scan(&mut index, dir.path());
+        assert_eq!((report.moved, report.added), (0, 1));
+        assert_eq!(id_of(&index, &dir.path().join("a.flac")), a);
+
+        // Both gone, then one file with their sound: which one is not known.
+        print_all(&mut index);
+        let out = tempfile::tempdir().unwrap();
+        fs::rename(dir.path().join("a.flac"), out.path().join("a.flac")).unwrap();
+        fs::rename(&copy, out.path().join("copy.flac")).unwrap();
+        let back = dir.path().join("back.flac");
+        fs::copy(out.path().join("a.flac"), &back).unwrap();
+        retag(&back, "Back");
+        let report = scan(&mut index, dir.path());
+        assert_eq!((report.moved, report.added, report.missing), (0, 1, 2));
+        assert_ne!(id_of(&index, &back), a);
+    }
+
+    /// The cost of a first scan, then of the prints after it, on
+    /// `KANADE_SCAN_FILES` copies of the fixtures, in release:
+    /// `cargo test --release --lib scan_cost -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "a measure, a few minutes"]
+    fn scan_cost() {
+        let count: usize = std::env::var("KANADE_SCAN_FILES")
+            .map_or(2000, |n| n.parse().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..count {
+            let (name, _) = FIXTURES[i % FIXTURES.len()];
+            let folder = dir.path().join(format!("{:03}", i / 100));
+            fs::create_dir_all(&folder).unwrap();
+            tagged_copy(name, &folder.join(format!("{i:05}-{name}")), &format!("Track {i}"));
+        }
+        let mut index = Index::open_in_memory().unwrap();
+        let start = std::time::Instant::now();
+        let report = scan(&mut index, dir.path());
+        let scanned = start.elapsed();
+        let start = std::time::Instant::now();
+        print_all(&mut index);
+        let printed = start.elapsed();
+        eprintln!(
+            "SCAN {} files: scan {scanned:?}, prints {printed:?} ({:?} a file)",
+            report.added,
+            printed / u32::try_from(report.added.max(1)).unwrap()
         );
     }
 

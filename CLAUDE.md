@@ -147,6 +147,21 @@ Logiciel Windows pour gérer ses fichiers musique (MP3, FLAC, MP4/M4A, OGG…) :
   jamais redonné. Les commandes Rust et l'interface désignent un morceau par cet
   identifiant, jamais par son chemin. Un fichier manquant ou illisible reste dans l'index,
   marqué, pendant 30 jours (`KEEP_GONE_MS`) avant d'en sortir.
+- Empreinte du son (KAN-41, `library/fingerprint.rs`) : les 10 premières secondes
+  décodées par Symphonia, hachées (FNV-1a, stable d'une version à l'autre) avec la
+  fréquence, les canaux et la durée. Les tags n'y sont pas : un fichier déplacé puis
+  retagué ailleurs garde son identifiant.
+  - Colonne `print` de `tracks` : NULL à faire, 0 sans empreinte (Opus, APE…), remise à
+    NULL quand le fichier est relu. Changer la façon de la faire = monter `PRINT_VERSION`
+    et une étape de migration qui les vide.
+  - Faite en fond par le fil des scans quand aucun scan n'attend, 50 à la fois
+    (`print_some`) ; un fichier seulement sur OneDrive n'est pas lu. Le scan reste
+    aussi rapide : au premier scan, rien n'a d'empreinte.
+  - Le scan ne la calcule que pour un nouveau fichier que ses tags ne relient à rien,
+    s'il existe un morceau disparu empreint, de même format et de durée voisine
+    (index partiel `tracks_sound`) ; deux candidats égaux ne sont pas devinés.
+  - Les tests attendent aussi la fin des empreintes (`wait_idle`) : Windows ne renomme
+    pas le dossier d'un fichier ouvert.
 - Bibliothèques (`library/libraries.rs`) : un morceau appartient à la bibliothèque dont la
   racine contient son chemin ; deux racines ne se chevauchent jamais (même dossier, l'un
   dans l'autre), et le disque système ou le profil entier sont refusés.

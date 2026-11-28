@@ -7,6 +7,7 @@
 //! told only when it changed something.
 
 use std::collections::VecDeque;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
@@ -15,7 +16,8 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use super::index::Index;
+use super::fingerprint;
+use super::index::{Index, TrackId};
 use super::libraries::{LastScan, LibraryId};
 use super::paths;
 use super::scan::{ScanControl, ScanProgress, ScanReport, scan_folder_with};
@@ -99,7 +101,20 @@ struct State {
     queue: VecDeque<Job>,
     running: Option<Running>,
     stopping: bool,
+    /// Tracks may be without a print (KAN-41): made when no scan waits.
+    prints_due: bool,
 }
+
+/// What the scan thread does next.
+enum Task {
+    Scan(Job, Arc<AtomicBool>),
+    /// No scan waits: a few prints.
+    Prints,
+    Stop,
+}
+
+/// Tracks printed at a time, between two looks at the scans' queue.
+const PRINT_BATCH: usize = 50;
 
 struct Shared {
     state: Mutex<State>,
@@ -138,7 +153,11 @@ impl Scanner {
     /// of its own (store::open_writer).
     pub fn start(index: Index, events: impl ScanEvents) -> Self {
         let shared = Arc::new(Shared {
-            state: Mutex::default(),
+            // The tracks of the last launches may be without a print.
+            state: Mutex::new(State {
+                prints_due: true,
+                ..State::default()
+            }),
             wake: Condvar::new(),
             events: Box::new(events),
         });
@@ -193,12 +212,14 @@ impl Scanner {
         self.queue.state_of(library)
     }
 
-    /// Waits until no scan waits or runs.
+    /// Waits until no scan waits or runs, and every track that can be is
+    /// printed: no file of the libraries is open any more (Windows does not
+    /// rename the folder of a file open).
     #[cfg(test)]
     pub(crate) fn wait_idle(&self) {
         let shared = &self.queue.shared;
         let mut state = shared.lock();
-        while state.running.is_some() || !state.queue.is_empty() {
+        while state.running.is_some() || !state.queue.is_empty() || state.prints_due {
             state = shared.wait(state);
         }
     }
@@ -327,30 +348,53 @@ impl Drop for Scanner {
     }
 }
 
-/// The scan thread: one job after another, until the scanner stops.
+/// The scan thread: one job after another, until the scanner stops; in
+/// between, the prints of the tracks without one (KAN-41).
 fn work(shared: &Shared, mut index: Index) {
-    while let Some((job, cancel)) = next_job(shared) {
-        let changed = match &job.scope {
-            Scope::All => {
-                shared.events.changed();
-                scan(shared, &mut index, &job, &cancel);
-                true
+    // Where the prints' round is: the tracks after this one are left.
+    let mut after = TrackId(0);
+    loop {
+        match next_task(shared) {
+            Task::Stop => return,
+            Task::Prints => {
+                let more = print_some(shared, &mut index, &mut after);
+                if !more {
+                    shared.lock().prints_due = false;
+                    shared.wake.notify_all();
+                }
             }
-            Scope::Folders(folders) => update(shared, &mut index, job.library, folders, &cancel),
-        };
-        shared.lock().running = None;
-        shared.wake.notify_all();
-        if changed {
-            shared.events.changed();
+            Task::Scan(job, cancel) => {
+                let changed = match &job.scope {
+                    Scope::All => {
+                        shared.events.changed();
+                        scan(shared, &mut index, &job, &cancel);
+                        true
+                    }
+                    Scope::Folders(folders) => {
+                        update(shared, &mut index, job.library, folders, &cancel)
+                    }
+                };
+                {
+                    let mut state = shared.lock();
+                    state.running = None;
+                    // New files, or files read again: a new round of prints.
+                    state.prints_due = true;
+                }
+                after = TrackId(0);
+                shared.wake.notify_all();
+                if changed {
+                    shared.events.changed();
+                }
+            }
         }
     }
 }
 
-fn next_job(shared: &Shared) -> Option<(Job, Arc<AtomicBool>)> {
+fn next_task(shared: &Shared) -> Task {
     let mut state = shared.lock();
     loop {
         if state.stopping {
-            return None;
+            return Task::Stop;
         }
         if let Some(job) = state.queue.pop_front() {
             let cancel = Arc::new(AtomicBool::new(false));
@@ -360,10 +404,38 @@ fn next_job(shared: &Shared) -> Option<(Job, Arc<AtomicBool>)> {
                 progress: ScanProgress::default(),
                 quiet: matches!(job.scope, Scope::Folders(_)),
             });
-            return Some((job, cancel));
+            return Task::Scan(job, cancel);
+        }
+        if state.prints_due {
+            return Task::Prints;
         }
         state = shared.wait(state);
     }
+}
+
+/// Prints a few tracks after `after`; false once the round is over. A scan
+/// asked meanwhile goes first: the round goes on after it. A file only in
+/// the cloud is not read (that would download it): it stays without a print.
+fn print_some(shared: &Shared, index: &mut Index, after: &mut TrackId) -> bool {
+    let Ok(batch) = index.to_print(*after, PRINT_BATCH) else {
+        // A database that no longer reads: no prints, the scans go on.
+        return false;
+    };
+    for item in &batch {
+        {
+            let state = shared.lock();
+            if state.stopping || !state.queue.is_empty() {
+                return true;
+            }
+        }
+        *after = item.id;
+        let path = Path::new(&item.path);
+        let here = fs::metadata(paths::for_io(path)).is_ok_and(|m| !paths::is_online_only(&m));
+        if here {
+            let _ = index.set_print(item.id, item.stamp, fingerprint::print(path));
+        }
+    }
+    batch.len() == PRINT_BATCH
 }
 
 /// Scans one library and keeps how it ended.
@@ -747,6 +819,53 @@ mod tests {
         scanner.enqueue(library.id, false);
         scanner.wait_idle();
         assert_eq!(index.count().unwrap(), 0);
+    }
+
+    /// KAN-41: once the scans are done, the tracks are printed; a file
+    /// only in the cloud is not read for it.
+    #[test]
+    fn the_tracks_are_printed_once_the_scans_are_done() {
+        let mut s = setup();
+        let library = s
+            .index
+            .add_library(&s.root, &TooBroad::default(), 0)
+            .unwrap();
+        #[cfg(windows)]
+        {
+            let cloud = s.root.join("tone.wav");
+            let status = std::process::Command::new("attrib")
+                .arg("+O")
+                .arg(&cloud)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+        s.scanner.enqueue(library.id, true);
+        s.scanner.wait_idle();
+        let printed: Vec<(String, Option<i64>)> = s
+            .index
+            .tracks()
+            .unwrap()
+            .into_iter()
+            .map(|t| {
+                let print: Option<i64> = s
+                    .index
+                    .conn
+                    .query_row("SELECT print FROM tracks WHERE id = ?1", [t.id.0], |r| {
+                        r.get(0)
+                    })
+                    .unwrap();
+                (t.track.format, print)
+            })
+            .collect();
+        assert_eq!(printed.len(), FIXTURES.len());
+        for (format, print) in printed {
+            match format.as_str() {
+                "Opus" => assert_eq!(print, Some(0), "{format}"),
+                "WAV" if cfg!(windows) => assert_eq!(print, None, "{format}"),
+                _ => assert!(print.is_some_and(|p| p != 0), "{format}: {print:?}"),
+            }
+        }
     }
 
     #[test]
